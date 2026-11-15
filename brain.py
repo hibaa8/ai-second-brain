@@ -8,10 +8,13 @@ from collections import deque
 from datetime import date, datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
 
 
 LINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
@@ -69,6 +72,121 @@ def add_source(vault: Path, file: Path, title: str | None) -> dict:
     return record
 
 
+def write_source_records(vault: Path, records: list[dict]) -> None:
+    catalog = vault / "raw" / "sources.jsonl"
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=catalog.parent,
+                                     delete=False) as stream:
+        temporary = Path(stream.name)
+        for record in records:
+            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+    try:
+        os.replace(temporary, catalog)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def ingest_file(vault: Path, file: Path, title: str | None = None,
+                max_bytes: int = 50 * 1024 * 1024) -> dict:
+    """Store one original in the private vault, reusing identical content."""
+    vault = vault.expanduser().resolve()
+    file = file.expanduser().resolve()
+    if not file.is_file():
+        raise ValueError(f"No such file: {file}")
+    size = file.stat().st_size
+    if size > max_bytes:
+        raise ValueError(f"File is {size} bytes, above the {max_bytes} byte import limit. "
+                         "Use --max-mb to raise it or `source` to reference an external archive.")
+    digest = sha256(file)
+    records = source_records(vault)
+    existing = next((r for r in records if r["sha256"] == digest), None)
+    raw = vault / "raw"
+    if existing and source_path(vault, existing["location"]).resolve().is_relative_to(raw):
+        if source_path(vault, existing["location"]).is_file():
+            if sha256(source_path(vault, existing["location"])) != digest:
+                raise ValueError(f"Stored source {existing['id']} changed since registration")
+            return {**existing, "already_stored": True}
+    if file.is_relative_to(raw):
+        stored = file
+    else:
+        suffix = file.suffix.lower()
+        if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+            suffix = ".bin"
+        stored = raw / "objects" / digest[:2] / f"{digest}{suffix}"
+        stored.parent.mkdir(parents=True, exist_ok=True)
+        if not stored.exists():
+            with tempfile.NamedTemporaryFile(dir=stored.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                with file.open("rb") as original:
+                    shutil.copyfileobj(original, stream)
+            try:
+                if sha256(temporary) != digest:
+                    raise ValueError("Source changed during import")
+                os.replace(temporary, stored)
+            finally:
+                temporary.unlink(missing_ok=True)
+        if sha256(stored) != digest:
+            raise ValueError(f"Stored source collision or corruption: {stored}")
+    location = str(stored.relative_to(vault))
+    if existing:
+        previous = existing["location"]
+        if previous != location:
+            existing["original_location"] = previous
+            existing["location"] = location
+            existing["stored_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            write_source_records(vault, records)
+        return {**existing, "already_registered": True, "already_stored": False}
+    record = add_source(vault, stored, title or file.name)
+    return {**record, "already_stored": False}
+
+
+def import_chat(vault: Path, export: Path) -> dict:
+    """Import JSONL chat messages with stable thread and turn IDs."""
+    messages = []
+    for number, line in enumerate(export.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        message = json.loads(line)
+        for key in ("thread_id", "turn_id", "role", "text"):
+            if not isinstance(message.get(key), str) or not message[key]:
+                raise ValueError(f"Line {number}: missing string {key}")
+        if message["role"] not in {"user", "assistant"}:
+            raise ValueError(f"Line {number}: role must be user or assistant")
+        messages.append(message)
+    if not messages:
+        raise ValueError("Chat export has no messages")
+    prepared = {}
+    for message in messages:
+        identity = "\0".join(message[k] for k in ("thread_id", "turn_id", "role"))
+        if message.get("item_id"):
+            identity += "\0" + str(message["item_id"])
+        thread = hashlib.sha256(message["thread_id"].encode()).hexdigest()[:16]
+        turn = hashlib.sha256(identity.encode()).hexdigest()[:16]
+        path = vault / "raw" / "chats" / thread / f"{turn}.json"
+        data = (json.dumps(message, ensure_ascii=False, sort_keys=True,
+                           separators=(",", ":")) + "\n").encode("utf-8")
+        if path in prepared and prepared[path] != data:
+            raise ValueError(f"Conflicting duplicate chat message in export: {identity}")
+        if path.exists() and path.read_bytes() != data:
+            raise ValueError(f"Chat message changed since import: {identity}")
+        prepared[path] = data
+    added = 0
+    for path, data in prepared.items():
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(data)
+            try:
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
+            added += 1
+        add_source(vault, path, f"Chat message {path.stem}")
+    return {"messages": len(prepared), "added": added,
+            "already_present": len(prepared) - added}
+
+
 def parse_page(path: Path) -> tuple[dict, str, list[dict], list[str]]:
     text = path.read_text(encoding="utf-8")
     match = FRONTMATTER.match(text)
@@ -123,9 +241,14 @@ def validate(vault: Path) -> list[str]:
     source_ids = [r.get("id") for r in records]
     if len(source_ids) != len(set(source_ids)):
         errors.append("raw/sources.jsonl: duplicate source ID")
+    source_hashes = [r.get("sha256") for r in records]
+    if len(source_hashes) != len(set(source_hashes)):
+        errors.append("raw/sources.jsonl: duplicate source content")
     for record in records:
         path = source_path(vault, record["location"])
-        if path.is_file() and sha256(path) != record["sha256"]:
+        if not path.is_file() and path.resolve().is_relative_to((vault / "raw").resolve()):
+            errors.append(f"raw/sources.jsonl: stored source {record['id']} is missing")
+        elif path.is_file() and sha256(path) != record["sha256"]:
             errors.append(f"raw/sources.jsonl: source {record['id']} changed since registration")
     pages = []
     for path in sorted((vault / "wiki").rglob("*.md")):
@@ -284,9 +407,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault", type=Path, required=True, help="Path to an Obsidian vault")
     commands = parser.add_subparsers(dest="command", required=True)
-    source_cmd = commands.add_parser("source", help="Register a raw source without copying it")
+    source_cmd = commands.add_parser("source", help="Reference a raw source without copying it")
     source_cmd.add_argument("file", type=Path)
     source_cmd.add_argument("--title")
+    ingest_cmd = commands.add_parser("ingest", help="Copy a document or chat export into the private vault, deduplicated by content")
+    ingest_cmd.add_argument("file", type=Path)
+    ingest_cmd.add_argument("--title")
+    ingest_cmd.add_argument("--max-mb", type=int, default=50)
+    chat_cmd = commands.add_parser("chat-import", help="Store JSONL chat messages once per thread/turn/role/item ID")
+    chat_cmd.add_argument("file", type=Path)
     commands.add_parser("check", help="Validate pages, sources, and typed relationships")
     commands.add_parser("index", help="Rebuild the disposable SQLite search and graph index")
     find_cmd = commands.add_parser("search", help="Search wiki pages by exact words")
@@ -304,6 +433,12 @@ def main() -> int:
     try:
         if args.command == "source":
             result = add_source(vault, args.file, args.title)
+        elif args.command == "ingest":
+            if args.max_mb < 1:
+                raise ValueError("--max-mb must be positive")
+            result = ingest_file(vault, args.file, args.title, args.max_mb * 1024 * 1024)
+        elif args.command == "chat-import":
+            result = import_chat(vault, args.file)
         elif args.command == "check":
             errors = validate(vault)
             result = {"ok": not errors, "errors": errors}

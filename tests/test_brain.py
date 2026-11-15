@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import shutil
 import tempfile
 import unittest
@@ -24,6 +25,40 @@ class BrainTests(unittest.TestCase):
         result = brain.add_source(self.vault, duplicate, None)
         self.assertTrue(result["already_registered"])
         self.assertEqual(len(brain.source_records(self.vault)), before)
+
+    def test_ingest_stores_one_copy_and_upgrades_external_reference(self):
+        external = Path(self.temp.name) / "report.pdf"
+        external.write_bytes(b"%PDF-test document")
+        reference = brain.add_source(self.vault, external, "Report")
+        imported = brain.ingest_file(self.vault, external)
+        self.assertEqual(imported["id"], reference["id"])
+        self.assertEqual(imported["original_location"], str(external.resolve()))
+        stored = self.vault / imported["location"]
+        self.assertEqual(stored.read_bytes(), external.read_bytes())
+        duplicate = Path(self.temp.name) / "renamed.pdf"
+        duplicate.write_bytes(external.read_bytes())
+        again = brain.ingest_file(self.vault, duplicate)
+        self.assertTrue(again["already_stored"])
+        self.assertEqual(len(list((self.vault / "raw" / "objects").rglob("*.pdf"))), 1)
+        self.assertEqual(brain.validate(self.vault), [])
+        stored.unlink()
+        self.assertTrue(any("stored source" in error for error in brain.validate(self.vault)))
+
+    def test_chat_import_is_idempotent_and_rejects_changed_turn(self):
+        export = Path(self.temp.name) / "chat.jsonl"
+        first = {"thread_id": "chat-a", "turn_id": "turn-1", "role": "user",
+                 "text": "Remember the original document.", "created_at": "2026-11-15"}
+        second = {"thread_id": "chat-a", "turn_id": "turn-1", "role": "assistant",
+                  "text": "I will catalog it.", "created_at": "2026-11-15"}
+        export.write_text("\n".join(json.dumps(item) for item in (first, second)) + "\n")
+        self.assertEqual(brain.import_chat(self.vault, export)["added"], 2)
+        self.assertEqual(brain.import_chat(self.vault, export)["already_present"], 2)
+        self.assertEqual(len(list((self.vault / "raw" / "chats").rglob("*.json"))), 2)
+        self.assertEqual(brain.validate(self.vault), [])
+        first["text"] = "A conflicting edit."
+        export.write_text(json.dumps(first) + "\n")
+        with self.assertRaisesRegex(ValueError, "changed since import"):
+            brain.import_chat(self.vault, export)
 
     def test_search_and_bounded_relationship_walk(self):
         brain.build_index(self.vault)
