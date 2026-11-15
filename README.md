@@ -9,7 +9,7 @@ This is an original, small implementation inspired by [Karpathy's LLM Wiki](http
 ```mermaid
 flowchart TB
     subgraph private["Private sources and Obsidian vault"]
-        S["Original documents or selected chats"] --> C["Source catalog<br/>ID · hash · location"]
+        S["Stored raw documents<br/>and chat messages"] --> C["Source catalog<br/>ID · hash · location"]
         C --> W["Codex capture<br/>and validation"]
         W --> M["Markdown wiki<br/>pages · synthesis · typed links"]
         M --> O["Obsidian<br/>browse and review"]
@@ -25,7 +25,7 @@ flowchart TB
 
 The Markdown and source catalog are durable records. The SQLite index is a disposable projection stored outside the vault. The optional hooks record text from supported local Codex turns after they have been reviewed and trusted; wiki facts are still written deliberately from registered sources.
 
-- **Raw sources** remain original files. Registration stores a hash and path; it does not duplicate the file.
+- **Raw sources** can be copied into the private vault with `ingest`, or referenced in a separate private archive with `source`. Identical file bytes reuse one stored copy. Chat imports deduplicate by thread, turn, role, and optional item ID.
 - **Wiki pages** are ordinary Markdown with a small frontmatter schema. Obsidian renders links and graph view.
 - **Typed relationships** are source-backed rows in a page's `## Relationships` table. The CLI derives graph edges from the same text Obsidian shows.
 - **Search** uses SQLite FTS5. Both the full-text index and graph projection are rebuilt from Markdown.
@@ -90,14 +90,20 @@ The regression cases check retrieval, graph traversal, and source integrity. The
 
 1. Create a private folder and open it as a vault in Obsidian. Do not place private sources in this public repository.
 2. Copy `SCHEMA.md` and adapt the `AGENTS.md` guidance to the private vault. Keep the initial `wiki/index.md` and `wiki/now.md` short.
-3. Register a source: `python3 brain.py --vault /absolute/path/to/vault source /absolute/path/to/document --title "Document title"`.
-4. Ask Codex to use the **brain-capture** skill to create or update source-backed pages, then run `check` and `index`.
-5. Ask a question with the **brain-recall** skill. It searches first, traverses typed relationships only when useful, and synthesizes a cited answer.
+3. Store a raw document: `python3 brain.py --vault /absolute/path/to/vault ingest /absolute/path/to/document --title "Document title"`. The default per-file limit is 50 MB; use `--max-mb` when intentionally storing a larger file. For an original already kept in a separately backed-up private archive, use `source` to reference it without copying.
+4. Import raw chats from a JSONL export: `python3 brain.py --vault /absolute/path/to/vault chat-import /absolute/path/to/chat.jsonl`. Each line needs `thread_id`, `turn_id`, `role`, and `text`; an optional `item_id` distinguishes multiple messages in a turn. Repeated imports reuse the stored messages.
+
+   ```json
+   {"thread_id":"chat-123","turn_id":"turn-1","role":"user","text":"My original message","created_at":"2026-11-15T10:00:00Z"}
+   ```
+
+5. Ask Codex to use the **brain-capture** skill to create or update source-backed pages, then run `check` and `index`.
+6. Ask a question with the **brain-recall** skill. It searches first, traverses typed relationships only when useful, and synthesizes a cited answer.
 
 See [SCHEMA.md](SCHEMA.md) for page and relationship conventions and [the evaluation guide](evals/README.md) for how to test memory performance.
 
 ## Boundaries
 
-The CLI does not import every past Codex or ChatGPT conversation automatically. Chat capture coverage must be tested for the environment before any daily ingestion is enabled. A registered external source remains wherever it was saved; the vault record is not its backup. Obsidian Sync and a separate backup can be configured independently.
+The CLI does not import every past Codex or ChatGPT conversation automatically. The optional hook stores bounded local turns; full chat exports need `chat-import`. Uploaded attachments need a separate `ingest` step. Content hashes remove exact document duplicates, and stable message IDs remove repeated chat turns; similar versions remain separate for review. A registered external source remains wherever it was saved; the vault record is not its backup. Obsidian Sync and a separate backup can be configured independently.
 
 For a public portfolio repository, use only synthetic examples. Keep the real vault separate and private. Generated `.brain-index/` files should not be committed.

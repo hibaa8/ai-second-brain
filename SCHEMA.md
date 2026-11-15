@@ -2,9 +2,11 @@
 
 ## Source catalog
 
-`raw/sources.jsonl` has one JSON object per original. `brain.py source` appends records with `id`, `title`, `location`, `sha256`, `bytes`, and `registered_at`. The ID is based on the content hash, so a second registration of identical bytes reuses the same source. A relative location is resolved from the vault root; an absolute location points to an external private archive.
+`raw/sources.jsonl` has one JSON object per original. `brain.py ingest` copies a file into `raw/objects/` and catalogs `id`, `title`, `location`, `sha256`, `bytes`, and `registered_at`. The ID is based on the content hash, so importing identical bytes again reuses the stored source. Files already under `raw/` are cataloged in place. If an external source was previously registered, ingestion upgrades its catalog entry to the stored copy while retaining `original_location`.
 
-Registration catalogs a source; it does not move, copy, or back it up. Keep originals in an independently backed-up location.
+`brain.py source` is a reference-only alternative: it catalogs a file without copying it. Its absolute location can point to a separate private archive, but it is not a backup. `ingest` defaults to a 50 MB per-file limit; raise `--max-mb` deliberately for larger originals, or use a separately backed-up archive and `source`. The vault itself still needs backup.
+
+For chats, `brain.py chat-import export.jsonl` accepts one JSON object per line with nonempty `thread_id`, `turn_id`, `role` (`user` or `assistant`), and `text`. Optional `item_id` distinguishes multiple messages of the same role in one turn; `created_at` and attachment metadata can be included. The importer stores immutable JSON under `raw/chats/`, cataloging each message as a source. Reimporting the same message is a no-op; changed content for the same message identity is a conflict that must be reviewed, rather than silently duplicated or overwritten. Store attached document bytes separately with `ingest` and link their source IDs from the wiki.
 
 ## Wiki pages
 
@@ -44,4 +46,4 @@ Codex answers from the retrieved page and source evidence. It cites source IDs o
 
 ## Storage
 
-The Obsidian vault holds Markdown and a catalog of originals. Large uploads and full chat exports may be kept in a private archive outside the vault. The SQLite index resides beside the vault and can be deleted and rebuilt. Use `brain.py size` to watch growth.
+The Obsidian vault holds Markdown, stored raw documents and chat messages, and a catalog. Large uploads may instead be referenced in a separate private archive. The SQLite index resides beside the vault and can be deleted and rebuilt. Use `brain.py size` to watch growth. Whole-file hashes deduplicate identical documents; stable message IDs deduplicate overlapping chat imports. Similar but nonidentical files remain separate until deliberately reviewed.
