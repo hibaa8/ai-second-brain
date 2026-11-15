@@ -1,4 +1,4 @@
-# Second Brain Ledger
+# Second Brain 
 
 An inspectable personal memory layer for Codex. Obsidian displays the Markdown vault; Codex uses three small skills to capture sources, retrieve evidence, and synthesize answers. A standard-library CLI builds a disposable full-text and typed-graph index. Codex's existing memory remains enabled and independent.
 
