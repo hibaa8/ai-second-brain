@@ -6,17 +6,42 @@ This is an original, small implementation inspired by [Karpathy's LLM Wiki](http
 
 ## What it does
 
-```text
-source file or chat → source catalog → source-backed wiki pages
-                                          ↓
-question → full-text seed → optional bounded graph walk → cited answer with gaps
+```mermaid
+flowchart LR
+    subgraph private["Private sources and Obsidian vault"]
+        S["Original documents or selected chats"] --> C["Source catalog<br/>ID · hash · location"]
+        C --> W["Codex capture<br/>and validation"]
+        W --> M["Markdown wiki<br/>pages · synthesis · typed links"]
+        M --> O["Obsidian<br/>browse and review"]
+    end
+
+    M --> I["Rebuildable SQLite index<br/>FTS5 · typed edges"]
+    Q["Question"] --> R["Codex recall<br/>search, then optional bounded walk"]
+    I --> R
+    R --> V["Verify pages against<br/>original sources"]
+    S --> V
+    V --> A["Cited answer<br/>with gaps or conflicts"]
 ```
+
+The Markdown and source catalog are durable records. The SQLite index is a disposable projection stored outside the vault. Only selected chats enter the capture path; automatic conversation ingestion is not implemented yet.
 
 - **Raw sources** remain original files. Registration stores a hash and path; it does not duplicate the file.
 - **Wiki pages** are ordinary Markdown with a small frontmatter schema. Obsidian renders links and graph view.
 - **Typed relationships** are source-backed rows in a page's `## Relationships` table. The CLI derives graph edges from the same text Obsidian shows.
 - **Search** uses SQLite FTS5. Both the full-text index and graph projection are rebuilt from Markdown.
 - **Synthesis** is a Codex workflow, not a second model service: it reads the retrieved pages and sources, cites concrete claims, and identifies gaps.
+
+## Design references
+
+| Source | Idea used here | Scope in this project |
+| --- | --- | --- |
+| [Andrej Karpathy, *LLM Wiki*](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | Raw sources, an evolving linked wiki, and agent instructions that govern capture and retrieval. | The vault keeps these layers visible as files. |
+| [Garry Tan, *GBrain*](https://github.com/garrytan/gbrain#architecture) | Typed relationship traversal, synthesis with gap analysis, and a rebuildable index over file-backed knowledge. | A few explicit edge types and a bounded walk; no GBrain service or database stack. |
+| [Obsidian, *How Obsidian stores data*](https://obsidian.md/help/Files%2Band%2Bfolders/How%2BObsidian%2Bstores%2Bdata) | A vault is a local folder of Markdown files that can be read and edited by other tools. | Obsidian is the visual editor and graph view; the files remain portable. |
+| [Chhikara et al., *Mem0*](https://arxiv.org/abs/2504.19413) | Long-term memory needs extraction, consolidation, and retrieval across conversations; the paper also explores graph memory. | Research context for later chat capture and evaluation, not a dependency or claimed benchmark result. |
+| [SQLite, *FTS5 Extension*](https://www.sqlite.org/fts5.html) | A local full-text index can retrieve candidate pages without embedding every source. | The CLI rebuilds FTS5 from the Markdown wiki. |
+
+These sources shaped the design; this repository is an independent implementation. [PLAN.md](PLAN.md) records the tradeoffs and planned evaluation.
 
 ## Try the fictional demo
 
