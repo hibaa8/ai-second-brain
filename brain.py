@@ -175,6 +175,10 @@ def import_chat(vault: Path, export: Path) -> dict:
         if path.exists() and path.read_bytes() != data:
             raise ValueError(f"Chat message changed since import: {identity}")
         prepared[path] = data
+    records = source_records(vault)
+    known_hashes = {record["sha256"] for record in records}
+    new_records = []
+    registered_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     added = 0
     for path, data in prepared.items():
         if not path.exists():
@@ -187,7 +191,20 @@ def import_chat(vault: Path, export: Path) -> dict:
             finally:
                 temporary.unlink(missing_ok=True)
             added += 1
-        add_source(vault, path, f"Chat message {path.stem}")
+        digest = hashlib.sha256(data).hexdigest()
+        if digest not in known_hashes:
+            new_records.append({"id": f"src-{digest[:16]}",
+                                "title": f"Chat message {path.stem}",
+                                "location": str(path.relative_to(vault)),
+                                "sha256": digest, "bytes": len(data),
+                                "registered_at": registered_at})
+            known_hashes.add(digest)
+    if new_records:
+        catalog = vault / "raw" / "sources.jsonl"
+        catalog.parent.mkdir(parents=True, exist_ok=True)
+        with catalog.open("a", encoding="utf-8") as stream:
+            for record in new_records:
+                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
     return {"messages": len(prepared), "added": added,
             "already_present": len(prepared) - added}
 
