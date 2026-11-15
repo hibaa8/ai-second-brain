@@ -35,7 +35,7 @@ The Markdown and source catalog are durable records. The SQLite index is a dispo
 
 ![Fictional demo vault graph with four wiki pages and three typed relationships](assets/demo-graph.svg)
 
-This picture is generated from the **fictional demo vault**. Each box is a wiki page; arrows are active, typed relationships with a registered source. Obsidian's graph view also shows ordinary wiki links, while this image shows only the stricter relationships used for traversal. The real vault stays private. Generate a current snapshot of your own vault with:
+This picture is generated from the **fictional demo vault**. Each box is a wiki page; arrows are active, typed relationships with a registered source. Obsidian's [native Graph view](https://obsidian.md/help/plugins/graph) shows wiki links and updates as the Markdown vault changes. In the private vault, its saved filter focuses on `wiki/` pages and hides navigation notes and raw records; the graph icon in Obsidian's left ribbon opens it. Its **Animate** button replays note creation order. That is a time-lapse of notes, not a complete history of changed edges. This SVG is a static snapshot and shows only the stricter relationships used for traversal. The real vault stays private. Generate a new snapshot of your own vault with:
 
 ```bash
 python3 graph_view.py --vault /absolute/path/to/private-vault --output /absolute/path/to/private-vault/graph-current.svg --label "My private graph"
