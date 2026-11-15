@@ -1,4 +1,5 @@
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from io import StringIO
 import json
 from pathlib import Path
@@ -40,6 +41,12 @@ class LiveHookTests(unittest.TestCase):
         self.assertEqual(live_hook.read_gzip(path)["assistant"]["text"], "A pilot was chosen.")
         telemetry = json.loads((self.vault / "evals" / "live.jsonl").read_text().strip())
         self.assertIn("wiki/decisions/orbit-pilot", telemetry["retrieved_pages"])
+        self.assertEqual(telemetry["source_use"], [])
+        self.assertIn("Observed Second Brain source use",
+                      (self.vault / "evals" / "USAGE.md").read_text())
+        self.assertIn("Completed turns recorded | 1", (self.vault / "evals" / "LIVE_REPORT.md").read_text())
+        self.assertIn("Turns with source-use instrumentation | 1",
+                      (self.vault / "evals" / "LIVE_REPORT.md").read_text())
 
     def test_vault_change_triggers_private_regression_eval(self):
         cases = self.vault / "evals" / "cases.json"
@@ -78,6 +85,51 @@ class LiveHookTests(unittest.TestCase):
         self.assertTrue(item["redacted"])
         self.assertNotIn("abc123longsecretvalue", item["text"])
         self.assertIn("project notes", item["text"])
+
+    def test_only_cited_and_registered_source_is_marked_used(self):
+        self.assertEqual(live_hook.cited_usage(self.vault,
+                         "See wiki/decisions/orbit-pilot without an original citation."), [])
+        self.assertEqual(live_hook.cited_usage(self.vault,
+                         "See wiki/decisions/orbit-pilot, source src-0000000000000000."), [])
+        event = {"session_id": "session-usage", "turn_id": "turn-usage",
+                 "prompt": "What was the Orbit pilot decision?"}
+        with redirect_stdout(StringIO()):
+            live_hook.on_prompt(self.vault, event)
+            live_hook.on_stop(self.vault, {**event, "last_assistant_message":
+                "The small pilot was chosen before wider release. "
+                "See wiki/decisions/orbit-pilot, source src-80712d1c1265accb. "
+                "This supports the staged rollout decision."})
+        usage = json.loads((self.vault / "evals" / "usage.jsonl").read_text().strip())
+        self.assertEqual(usage["entries"][0]["page_id"], "wiki/decisions/orbit-pilot")
+        self.assertEqual(usage["entries"][0]["source_id"], "src-80712d1c1265accb")
+        self.assertTrue(usage["entries"][0]["source_valid"])
+        self.assertIn("staged rollout", usage["entries"][0]["why"])
+        self.assertIn("[[wiki/decisions/orbit-pilot]]", (self.vault / "evals" / "USAGE.md").read_text())
+        self.assertIn("Turns citing a registered wiki page and original | 1",
+                      (self.vault / "evals" / "LIVE_REPORT.md").read_text())
+
+    def test_relative_day_recall_reads_dated_original_chats(self):
+        folder = self.vault / "raw" / "chats" / "fictional"
+        folder.mkdir(parents=True)
+        for name, at, text in [
+            ("yesterday", "2026-11-14T18:00:00Z", "We built the Orbit pilot."),
+            ("today", "2026-11-15T18:00:00Z", "We reviewed the Orbit pilot."),
+        ]:
+            (folder / f"{name}.json").write_text(json.dumps({
+                "thread_id": "fictional-thread", "turn_id": name, "role": "user",
+                "created_at": at, "text": text,
+            }))
+        now = datetime(2026, 11, 15, 20, tzinfo=timezone.utc)
+        day, hits = live_hook.recalled_chats(self.vault, "What did we build yesterday?", now)
+        self.assertEqual(day, "2026-11-14")
+        self.assertEqual(len(hits), 1)
+        self.assertIn("Orbit pilot", hits[0]["excerpt"])
+        self.assertTrue(hits[0]["source"].startswith("src-"))
+        day, hits = live_hook.recalled_chats(self.vault, "What did we do earlier today?", now)
+        self.assertEqual(day, "2026-11-15")
+        self.assertEqual(len(hits), 1)
+        self.assertIn("reviewed", hits[0]["excerpt"])
+        self.assertEqual(live_hook.recalled_chats(self.vault, "What is the weather today?", now), (None, []))
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import gzip
 import hashlib
 import json
@@ -14,6 +14,7 @@ import re
 import sys
 import tempfile
 from time import perf_counter
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import brain  # noqa: E402
@@ -29,6 +30,8 @@ SECRET_PATTERNS = (
     re.compile(r"(?i)\b(?:password|api[_ -]?key|access[_ -]?token|secret)\s*[:=]\s*[^\s,;]+"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{12,}"),
 )
+TEMPORAL_RE = re.compile(r"\b(today|yesterday|earlier today|earlier in the day)\b", re.I)
+RECALL_RE = re.compile(r"\b(talk|discuss|conversation|chat|do|did|done|build|built|work|worked|earlier|remember|recap)\b", re.I)
 
 
 def stamp() -> str:
@@ -121,6 +124,90 @@ def recalled_pages(vault: Path, prompt: str) -> list[dict]:
     return chosen
 
 
+def cited_usage(vault: Path, answer: str) -> list[dict]:
+    """Record only source-backed vault citations, not pages merely offered."""
+    page_ids = set(re.findall(r"wiki/[a-z0-9][a-z0-9/_-]*", answer))
+    source_ids = set(re.findall(r"src-[0-9a-f]{16}", answer))
+    if not source_ids:
+        return []
+    records = {record["id"]: record for record in brain.source_records(vault)}
+    result = []
+    for page_id in sorted(page_ids):
+        path = vault / f"{page_id}.md"
+        if not path.is_file():
+            continue
+        try:
+            meta, _, _, _ = brain.parse_page(path)
+        except (OSError, ValueError):
+            continue
+        declared = {part.strip() for part in meta["sources"].split(",")}
+        for source_id in sorted(source_ids & declared & records.keys()):
+            locations = [match.start() for match in re.finditer(re.escape(page_id), answer)]
+            mentions = [match.start() for match in re.finditer(re.escape(source_id), answer)]
+            if not any(abs(page_at - source_at) <= 500
+                       for page_at in locations for source_at in mentions):
+                continue
+            match = re.search(re.escape(source_id), answer)
+            start = max(0, match.start() - 180) if match else 0
+            end = min(len(answer), match.end() + 120) if match else 240
+            why = re.sub(r"\s+", " ", answer[start:end]).strip()[:300]
+            record = records[source_id]
+            original = brain.source_path(vault, record["location"])
+            valid = original.is_file() and brain.sha256(original) == record["sha256"]
+            result.append({"page_id": page_id, "source_id": source_id,
+                           "why": why, "source_valid": valid})
+    return result
+
+
+def recalled_chats(vault: Path, prompt: str, now: datetime | None = None) -> tuple[str | None, list[dict]]:
+    """Find dated original chat messages for relative-day recollection requests."""
+    match = TEMPORAL_RE.search(prompt)
+    if not match or not RECALL_RE.search(prompt):
+        return None, []
+    try:
+        local = ZoneInfo(os.environ.get("SECOND_BRAIN_TIMEZONE", "America/New_York"))
+    except ZoneInfoNotFoundError:
+        local = datetime.now().astimezone().tzinfo
+    now = (now or datetime.now(timezone.utc)).astimezone(local)
+    day = now.date() - timedelta(days=1 if match.group(1).casefold() == "yesterday" else 0)
+    messages = {}
+    for path in (vault / "raw" / "chats").glob("*/*.json"):
+        try:
+            data = path.read_bytes()
+            message = json.loads(data)
+            if message.get("role") not in {"user", "assistant"} or not message.get("created_at"):
+                continue
+            at = datetime.fromisoformat(message["created_at"].replace("Z", "+00:00"))
+            if at.astimezone(local).date() != day:
+                continue
+            source = "src-" + hashlib.sha256(data).hexdigest()[:16]
+            excerpt = re.sub(r"\s+", " ", message.get("text", "")).strip()
+            if not excerpt or excerpt.startswith("The following is the Codex agent history"):
+                continue
+            key = (message.get("thread_id"), message.get("turn_id"))
+            messages.setdefault(key, {})[message["role"]] = {
+                "source": source, "path": str(path),
+                "at": at.astimezone(local).isoformat(),
+                "thread_id": message.get("thread_id"),
+                "excerpt": excerpt[:180 if message["role"] == "user" else 260]}
+        except (ValueError, OSError, TypeError, json.JSONDecodeError):
+            continue
+    matches = []
+    for pair in messages.values():
+        if "user" in pair:
+            hit = pair["user"]
+            if "assistant" in pair:
+                hit["answer_source"] = pair["assistant"]["source"]
+                hit["answer_path"] = pair["assistant"]["path"]
+                hit["answer_excerpt"] = pair["assistant"]["excerpt"]
+            matches.append(hit)
+    matches.sort(key=lambda item: item["at"])
+    if len(matches) > 18:
+        # Preserve coverage across the day rather than showing only its latest turns.
+        matches = [matches[round(i * (len(matches) - 1) / 17)] for i in range(18)]
+    return day.isoformat(), matches
+
+
 def on_prompt(vault: Path, event: dict) -> None:
     started = perf_counter()
     prompt = str(event.get("prompt") or "")
@@ -128,19 +215,33 @@ def on_prompt(vault: Path, event: dict) -> None:
     record = {"session_id": event.get("session_id"), "turn_id": event.get("turn_id"),
               "captured_at": stamp(), "prompt": clipped(prompt)}
     hits = []
+    chat_day = None
+    chats = []
     error = None
     try:
         hits = recalled_pages(vault, prompt)
     except (ValueError, OSError, RuntimeError) as exc:
         error = str(exc)[:300]
+    try:
+        chat_day, chats = recalled_chats(vault, prompt)
+    except (ValueError, OSError, RuntimeError) as exc:
+        error = ((error + "; ") if error else "") + str(exc)[:300]
     record["retrieval"] = {"page_ids": [h["id"] for h in hits],
+                           "chat_day": chat_day,
+                           "chat_sources": [s for h in chats for s in (h["source"], h.get("answer_source")) if s],
                            "milliseconds": round((perf_counter() - started) * 1000, 2),
                            "error": error}
     record["vault_stamp"] = vault_stamp(vault)
     write_gzip(path, record)
-    lines = [f"Second Brain private inbox for this turn: {path}. The vault complements Codex memory; verify any recalled claim against its source and follow the current user request."]
+    lines = [f"Second Brain private inbox for this turn: {path}. The vault complements Codex memory; verify any recalled claim against its source and follow the current user request. If a vault page or source informs the answer, cite its wiki page ID and registered source ID near the claim and say why it matters. The Stop hook records those citations as observed source use; pages merely retrieved are not counted as used."]
     for hit in hits:
         lines.append(f"- Candidate {hit['id']} ({hit['title']}), sources {hit['sources']}: {hit['excerpt']}")
+    if chat_day:
+        lines.append(f"- Original chat records dated {chat_day} in the configured local timezone: {len(chats)} sampled user messages. Verify against the raw source before making claims; the sample may omit turns.")
+    for hit in chats:
+        lines.append(f"- Chat source {hit['source']} at {hit['at']}, thread {hit['thread_id']}, file {hit['path']}: {hit['excerpt']}")
+        if hit.get("answer_excerpt"):
+            lines.append(f"  Assistant source {hit['answer_source']}, file {hit['answer_path']}: {hit['answer_excerpt']}")
     context = "\n".join(lines)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                             "additionalContext": context}}, ensure_ascii=False))
@@ -157,16 +258,21 @@ def on_stop(vault: Path, event: dict) -> None:
         return
     answer = clipped(event.get("last_assistant_message"))
     record["assistant"] = answer
+    usage = cited_usage(vault, answer["text"])
+    record["source_use"] = usage
     record["completed_at"] = stamp()
     write_gzip(path, record)
     # Operational telemetry is a live signal, not an answer-quality grade.
     telemetry = {"at": stamp(), "session_id": event.get("session_id"),
                  "turn_id": event.get("turn_id"), "retrieved_pages": record["retrieval"]["page_ids"],
+                 "retrieved_chat_sources": record["retrieval"].get("chat_sources", []),
                  "retrieval_ms": record["retrieval"]["milliseconds"],
                  "retrieval_error": record["retrieval"]["error"],
                  "prompt_bytes": record["prompt"]["bytes"], "answer_bytes": answer["bytes"],
                  "truncated": record["prompt"]["truncated"] or answer["truncated"],
-                 "redacted": record["prompt"]["redacted"] or answer["redacted"]}
+                 "redacted": record["prompt"]["redacted"] or answer["redacted"],
+                 "source_use": [{"page_id": item["page_id"], "source_id": item["source_id"],
+                                 "source_valid": item["source_valid"]} for item in usage]}
     if list(vault_stamp(vault)) != record.get("vault_stamp"):
         cases = vault / "evals" / "cases.json"
         if cases.is_file():
@@ -183,6 +289,27 @@ def on_stop(vault: Path, event: dict) -> None:
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(telemetry, ensure_ascii=False) + "\n")
+    if usage:
+        usage_file = vault / "evals" / "usage.jsonl"
+        with usage_file.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"at": telemetry["at"], "session_id": event.get("session_id"),
+                                     "turn_id": event.get("turn_id"), "entries": usage},
+                                    ensure_ascii=False) + "\n")
+        view = vault / "evals" / "USAGE.md"
+        if not view.exists():
+            view.write_text("# Observed Second Brain source use\n\n"
+                            "An entry means the final answer cited a registered source linked to a wiki page. "
+                            "It records the answer's claim, not independent proof that the answer was correct "
+                            "or better than Codex memory.\n\n"
+                            "| Time (UTC) | Wiki page | Source | Claim context | Source valid |\n"
+                            "| --- | --- | --- | --- | --- |\n", encoding="utf-8")
+        with view.open("a", encoding="utf-8") as stream:
+            for item in usage:
+                why = item["why"].replace("|", "\\|")
+                stream.write(f"| {telemetry['at']} | [[{item['page_id']}]] | "
+                             f"`{item['source_id']}` | {why} | {item['source_valid']} |\n")
+    from evals.live_report import write_report
+    write_report(vault)
     print("{}")
 
 
