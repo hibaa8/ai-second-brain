@@ -58,6 +58,10 @@ python3 -m unittest discover -s tests -v
 
 The index is written beside the vault in `.brain-index/`, not inside the synced vault.
 
+## Evaluation
+
+Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke check. The included fictional demo currently passes 8/8 cases, with the expected page ranked first in 3/4 search questions. See [the dated results](evals/RESULTS.md) and [the paired answer-eval protocol](evals/README.md). These numbers do not measure personal recall or generated-answer quality.
+
 ## Use with your own vault
 
 1. Create a private folder and open it as a vault in Obsidian. Do not place private sources in this public repository.
