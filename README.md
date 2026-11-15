@@ -62,6 +62,10 @@ The index is written beside the vault in `.brain-index/`, not inside the synced 
 
 Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke check. The included fictional demo currently passes 8/8 cases, with the expected page ranked first in 3/4 search questions. See [the dated results](evals/RESULTS.md) and [the paired answer-eval protocol](evals/README.md). These numbers do not measure personal recall or generated-answer quality.
 
+## Live local Codex use
+
+The [optional Codex connection](integrations/codex/README.md) installs global guidance plus prompt and turn hooks. For supported local chats it records bounded private turn text, offers relevant wiki pages at prompt time, and runs regression cases after wiki changes. It is additive to Codex's built-in memory. ChatGPT Work, cloud runs, and other devices need separate integration and coverage tests.
+
 ## Use with your own vault
 
 1. Create a private folder and open it as a vault in Obsidian. Do not place private sources in this public repository.
