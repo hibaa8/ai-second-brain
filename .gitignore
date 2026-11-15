@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.brain-index/
+.DS_Store
+.obsidian/workspace.json
+.obsidian/workspaces.json
