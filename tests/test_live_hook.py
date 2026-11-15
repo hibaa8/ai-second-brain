@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from integrations.codex import install, live_hook
+from evals.run import evaluate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,8 +106,35 @@ class LiveHookTests(unittest.TestCase):
         self.assertTrue(usage["entries"][0]["source_valid"])
         self.assertIn("staged rollout", usage["entries"][0]["why"])
         self.assertIn("[[wiki/decisions/orbit-pilot]]", (self.vault / "evals" / "USAGE.md").read_text())
-        self.assertIn("Turns citing a registered wiki page and original | 1",
+        self.assertIn("Turns citing a registered original | 1",
                       (self.vault / "evals" / "LIVE_REPORT.md").read_text())
+
+    def test_cited_raw_chat_is_marked_as_source_use(self):
+        chat = self.vault / "raw" / "chats" / "sample" / "turn.json"
+        chat.parent.mkdir(parents=True)
+        chat.write_text(json.dumps({"thread_id": "sample", "turn_id": "turn",
+                                    "role": "user", "text": "I built the Orbit pilot."}))
+        source = live_hook.brain.add_source(self.vault, chat, "Original chat")
+        usage = live_hook.cited_usage(self.vault,
+                                      f"The user built the Orbit pilot. Source: {source['id']}.")
+        self.assertEqual(usage[0]["page_id"], None)
+        self.assertTrue(usage[0]["memory_ref"].endswith("raw/chats/sample/turn.json"))
+        self.assertTrue(usage[0]["source_valid"])
+
+    def test_prompt_terms_split_hyphenated_topics_and_ignore_generic_words(self):
+        self.assertIn("course", live_hook.key_terms("course-planning idea"))
+        self.assertIn("planning", live_hook.key_terms("course-planning idea"))
+        self.assertEqual(live_hook.key_terms("If evidence is not available, tell me that"), [])
+
+    def test_hook_retrieval_cases_check_offered_pages_and_abstention(self):
+        report = evaluate(self.vault, {"cases": [
+            {"kind": "hook", "name": "pilot recall", "query": "What was the Orbit pilot decision?",
+             "expected_page": "wiki/decisions/orbit-pilot", "top_k": 2},
+            {"kind": "hook", "name": "unknown pet", "query": "What is my dog's name?",
+             "expected_none": True},
+        ]})
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["cases_passed"], 2)
 
     def test_relative_day_recall_reads_dated_original_chats(self):
         folder = self.vault / "raw" / "chats" / "fictional"

@@ -23,7 +23,8 @@ import brain  # noqa: E402
 MAX_TEXT_BYTES = 64_000
 STOPWORDS = {"a", "an", "and", "are", "at", "be", "can", "do", "does", "for", "from",
              "how", "i", "in", "is", "it", "me", "my", "of", "on", "or", "our", "the",
-             "this", "to", "was", "we", "what", "when", "where", "which", "who", "with", "you"}
+             "this", "to", "was", "we", "what", "when", "where", "which", "who", "with", "you",
+             "available", "evidence", "not", "say", "tell", "that"}
 SECRET_PATTERNS = (
     re.compile(r"\b(?:sk|ghp|gho|github_pat)_[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
@@ -93,8 +94,40 @@ def ensure_index(vault: Path) -> bool:
 
 
 def key_terms(prompt: str) -> list[str]:
-    terms = re.findall(r"[\w-]{3,}", prompt.casefold())
+    terms = re.findall(r"[^\W_]{3,}", prompt.casefold())
     return list(dict.fromkeys(t for t in terms if t not in STOPWORDS))[:30]
+
+
+def evidence_excerpt(body: str, terms: list[str], limit: int = 480) -> str:
+    """Select query-relevant sentences within the existing context budget."""
+    prose = body.split("## Relationships", 1)[0]
+    prose = re.sub(r"(?m)^#{1,6} .*?$", "", prose)
+    prose = re.sub(r"\s*Sources?:\s*`src-[^`]+`(?:,\s*`src-[^`]+`)*\.?", "", prose)
+    prose = prose.replace("**Roadmap status:**", "Roadmap status:")
+    sentences = [re.sub(r"\s+", " ", part).strip()
+                 for part in re.split(r"(?<=[.!?])\s+(?=[A-Z])", prose)
+                 if part.strip()]
+    candidates = [(index, sentence, {term for term in terms if term in sentence.casefold()})
+                  for index, sentence in enumerate(sentences)]
+    candidates = [item for item in candidates if item[2]]
+    chosen = []
+    covered = set()
+    while candidates and len(chosen) < 3:
+        index, sentence, matched = max(candidates,
+                                       key=lambda item: (2 * len(item[2] - covered)
+                                                         + 0.5 * len(item[2]), -item[0]))
+        candidates = [item for item in candidates if item[0] != index]
+        room = limit - sum(len(value) + 1 for _, value in chosen)
+        if room < 50:
+            break
+        budget = min(room, 160)
+        if len(sentence) > budget:
+            sentence = sentence[:budget - 1].rsplit(" ", 1)[0] + "…"
+        chosen.append((index, sentence))
+        covered.update(matched)
+    if not chosen:
+        return re.sub(r"\s+", " ", prose).strip()[:limit]
+    return " ".join(sentence for _, sentence in sorted(chosen))[:limit]
 
 
 def recalled_pages(vault: Path, prompt: str) -> list[dict]:
@@ -104,7 +137,7 @@ def recalled_pages(vault: Path, prompt: str) -> list[dict]:
     ensure_index(vault)
     hits = brain.search(vault, " ".join(terms), limit=8)
     chosen = []
-    for hit in hits:
+    for rank, hit in enumerate(hits):
         path = Path(hit["path"])
         if not path.is_file():
             continue
@@ -113,10 +146,13 @@ def recalled_pages(vault: Path, prompt: str) -> list[dict]:
         haystack = (title + " " + body).casefold()
         overlap = sum(t in haystack for t in terms)
         exact_title = len(title) >= 5 and title in prompt.casefold()
-        anchors = set(key_terms(title)) - {"project", "decision", "memory", "brain", "topic", "person"}
-        if not exact_title and (overlap < 2 or not anchors.intersection(terms)):
+        anchors = set(key_terms(title)) - {"project", "decision", "memory", "brain",
+                                             "topic", "person", "agent", "agents", "idea",
+                                             "design", "2026"}
+        strong_first_hit = rank == 0 and overlap >= 4
+        if not exact_title and (overlap < 2 or not (anchors.intersection(terms) or strong_first_hit)):
             continue
-        excerpt = re.sub(r"\s+", " ", body).strip()[:360]
+        excerpt = evidence_excerpt(body, terms)
         chosen.append({"id": meta["id"], "title": meta["title"],
                        "sources": meta["sources"], "excerpt": excerpt})
         if len(chosen) == 2:
@@ -125,7 +161,7 @@ def recalled_pages(vault: Path, prompt: str) -> list[dict]:
 
 
 def cited_usage(vault: Path, answer: str) -> list[dict]:
-    """Record only source-backed vault citations, not pages merely offered."""
+    """Record registered originals cited in the answer, not candidates merely offered."""
     page_ids = set(re.findall(r"wiki/[a-z0-9][a-z0-9/_-]*", answer))
     source_ids = set(re.findall(r"src-[0-9a-f]{16}", answer))
     if not source_ids:
@@ -154,8 +190,20 @@ def cited_usage(vault: Path, answer: str) -> list[dict]:
             record = records[source_id]
             original = brain.source_path(vault, record["location"])
             valid = original.is_file() and brain.sha256(original) == record["sha256"]
-            result.append({"page_id": page_id, "source_id": source_id,
+            result.append({"page_id": page_id, "memory_ref": page_id,
+                           "source_id": source_id,
                            "why": why, "source_valid": valid})
+    linked = {item["source_id"] for item in result}
+    for source_id in sorted((source_ids & records.keys()) - linked):
+        record = records[source_id]
+        original = brain.source_path(vault, record["location"])
+        match = re.search(re.escape(source_id), answer)
+        start = max(0, match.start() - 180)
+        end = min(len(answer), match.end() + 120)
+        why = re.sub(r"\s+", " ", answer[start:end]).strip()[:300]
+        result.append({"page_id": None, "memory_ref": record["location"],
+                       "source_id": source_id, "why": why,
+                       "source_valid": original.is_file() and brain.sha256(original) == record["sha256"]})
     return result
 
 
@@ -233,7 +281,7 @@ def on_prompt(vault: Path, event: dict) -> None:
                            "error": error}
     record["vault_stamp"] = vault_stamp(vault)
     write_gzip(path, record)
-    lines = [f"Second Brain private inbox for this turn: {path}. The vault complements Codex memory; verify any recalled claim against its source and follow the current user request. If a vault page or source informs the answer, cite its wiki page ID and registered source ID near the claim and say why it matters. The Stop hook records those citations as observed source use; pages merely retrieved are not counted as used."]
+    lines = [f"Second Brain private inbox for this turn: {path}. The vault complements Codex memory; verify any recalled claim against its source and follow the current user request. If vault evidence informs the answer, cite its registered source ID and any wiki page ID near the claim, and say why it matters. The Stop hook records those citations as observed source use; pages and chats merely retrieved are not counted as used."]
     for hit in hits:
         lines.append(f"- Candidate {hit['id']} ({hit['title']}), sources {hit['sources']}: {hit['excerpt']}")
     if chat_day:
@@ -271,7 +319,8 @@ def on_stop(vault: Path, event: dict) -> None:
                  "prompt_bytes": record["prompt"]["bytes"], "answer_bytes": answer["bytes"],
                  "truncated": record["prompt"]["truncated"] or answer["truncated"],
                  "redacted": record["prompt"]["redacted"] or answer["redacted"],
-                 "source_use": [{"page_id": item["page_id"], "source_id": item["source_id"],
+                 "source_use": [{"page_id": item["page_id"], "memory_ref": item["memory_ref"],
+                                 "source_id": item["source_id"],
                                  "source_valid": item["source_valid"]} for item in usage]}
     if list(vault_stamp(vault)) != record.get("vault_stamp"):
         cases = vault / "evals" / "cases.json"
@@ -298,15 +347,16 @@ def on_stop(vault: Path, event: dict) -> None:
         view = vault / "evals" / "USAGE.md"
         if not view.exists():
             view.write_text("# Observed Second Brain source use\n\n"
-                            "An entry means the final answer cited a registered source linked to a wiki page. "
+                            "An entry means the final answer cited a registered original, with its wiki page when cited. "
                             "It records the answer's claim, not independent proof that the answer was correct "
                             "or better than Codex memory.\n\n"
-                            "| Time (UTC) | Wiki page | Source | Claim context | Source valid |\n"
+                            "| Time (UTC) | Memory item | Source | Claim context | Source valid |\n"
                             "| --- | --- | --- | --- | --- |\n", encoding="utf-8")
         with view.open("a", encoding="utf-8") as stream:
             for item in usage:
                 why = item["why"].replace("|", "\\|")
-                stream.write(f"| {telemetry['at']} | [[{item['page_id']}]] | "
+                label = f"[[{item['page_id']}]]" if item["page_id"] else f"`{item['memory_ref']}`"
+                stream.write(f"| {telemetry['at']} | {label} | "
                              f"`{item['source_id']}` | {why} | {item['source_valid']} |\n")
     from evals.live_report import write_report
     write_report(vault)

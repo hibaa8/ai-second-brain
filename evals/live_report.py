@@ -27,8 +27,8 @@ def summarize(vault: Path) -> str:
              f"| Completed turns recorded | {len(rows)} |",
              f"| Turns offered at least one wiki page | {offered} |",
              f"| Turns with source-use instrumentation | {len(instrumented)} |",
-             f"| Turns citing a registered wiki page and original | {cited} |",
-             f"| Cited page/source pairs | {len(pairs)} |",
+             f"| Turns citing a registered original | {cited} |",
+             f"| Cited original references | {len(pairs)} |",
              f"| Cited originals with valid hashes | {sum(x.get('source_valid') is True for x in pairs)} |",
              f"| Regression runs after vault changes | {len(regressions)} |",
              f"| Regression runs passing | {sum(x.get('ok') is True for x in regressions)} |",
@@ -48,7 +48,7 @@ def summarize(vault: Path) -> str:
                      f"{len(row.get('source_use', []))} | {state} |")
     lines += ["", "Older turns without source-use instrumentation are not counted as uncited. "
               "A page offered by retrieval is not counted as used. Source use requires a "
-              "final-answer citation to a registered original and a wiki page; see "
+              "final-answer citation to a registered original; a cited wiki page is linked when available. See "
               "[the usage log](USAGE.md) for the cited claim and why it mattered. "
               "Missing citations can undercount use. These signals do not grade answer correctness "
               "or show improvement over Codex's existing memory. A paired baseline and vault-assisted "
@@ -62,10 +62,10 @@ def write_report(vault: Path) -> Path:
     usage = target.parent / "USAGE.md"
     if not usage.exists():
         usage.write_text("# Observed Second Brain source use\n\n"
-                         "An entry means the final answer cited a registered source linked to a wiki page. "
+                         "An entry means the final answer cited a registered original, with its wiki page when cited. "
                          "It records the answer's claim, not independent proof that the answer was correct "
                          "or better than Codex memory.\n\n"
-                         "| Time (UTC) | Wiki page | Source | Claim context | Source valid |\n"
+                         "| Time (UTC) | Memory item | Source | Claim context | Source valid |\n"
                          "| --- | --- | --- | --- | --- |\n", encoding="utf-8")
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent,
                                      delete=False) as stream:
