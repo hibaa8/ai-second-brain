@@ -9,6 +9,8 @@ python3 integrations/codex/install.py --vault /absolute/path/to/private-vault
 
 Codex requires you to review and trust newly installed hooks in **Settings → Hooks** or `/hooks` before they run. Start a new local chat after installation; guidance is discovered at session start. The installer is idempotent. It does not edit `config.toml`, `/memories`, or Codex's memory store. Global guidance can still direct source lookup while hook trust is pending.
 
+To verify activation, submit a prompt in a new **local** Codex chat and check for a new `raw/inbox/<session-hash>/<turn-hash>.json.gz` file. After the turn ends, check `evals/live.jsonl`. If neither appears, do not count the turn as automatically captured or evaluated. A changed wiki or source catalog should also produce `evals/latest.json`.
+
 ## What runs during a local chat
 
 | Event | Action |

@@ -1,6 +1,6 @@
-# Second Brain 
+# Second Brain
 
-An inspectable personal memory layer for Codex. Obsidian displays the Markdown vault; Codex uses three small skills to capture sources, retrieve evidence, and synthesize answers. A standard-library CLI builds a disposable full-text and typed-graph index. Codex's existing memory remains enabled and independent.
+An inspectable personal memory layer for Codex. Obsidian displays the Markdown vault; Codex uses agent guidance and small skills to capture sources, retrieve evidence, and synthesize answers. Optional local hooks capture bounded turn text and offer relevant pages when a prompt arrives. A standard-library CLI builds a disposable full-text and typed-graph index. Codex's existing memory remains enabled and independent.
 
 This is an original, small implementation inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) and [Garry Tan's GBrain](https://github.com/garrytan/gbrain). It does not install or copy either project.
 
@@ -23,13 +23,25 @@ flowchart TB
     V --> A["Cited answer<br/>with gaps or conflicts"]
 ```
 
-The Markdown and source catalog are durable records. The SQLite index is a disposable projection stored outside the vault. Only selected chats enter the capture path; automatic conversation ingestion is not implemented yet.
+The Markdown and source catalog are durable records. The SQLite index is a disposable projection stored outside the vault. The optional hooks record text from supported local Codex turns after they have been reviewed and trusted; wiki facts are still written deliberately from registered sources.
 
 - **Raw sources** remain original files. Registration stores a hash and path; it does not duplicate the file.
 - **Wiki pages** are ordinary Markdown with a small frontmatter schema. Obsidian renders links and graph view.
 - **Typed relationships** are source-backed rows in a page's `## Relationships` table. The CLI derives graph edges from the same text Obsidian shows.
 - **Search** uses SQLite FTS5. Both the full-text index and graph projection are rebuilt from Markdown.
 - **Synthesis** is a Codex workflow, not a second model service: it reads the retrieved pages and sources, cites concrete claims, and identifies gaps.
+
+### Graph at a glance
+
+![Fictional demo vault graph with four wiki pages and three typed relationships](assets/demo-graph.svg)
+
+This picture is generated from the **fictional demo vault**. Each box is a wiki page; arrows are active, typed relationships with a registered source. Obsidian's graph view also shows ordinary wiki links, while this image shows only the stricter relationships used for traversal. The real vault stays private. Generate a current snapshot of your own vault with:
+
+```bash
+python3 graph_view.py --vault /absolute/path/to/private-vault --output /absolute/path/to/private-vault/graph-current.svg --label "My private graph"
+```
+
+Open `graph-current.svg` in Obsidian or any browser. Rerun the command after wiki changes; the image is a snapshot, not a live view.
 
 ## Design references
 
@@ -64,7 +76,15 @@ Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke 
 
 ## Live local Codex use
 
-The [optional Codex connection](integrations/codex/README.md) installs global guidance plus prompt and turn hooks. For supported local chats it records bounded private turn text, offers relevant wiki pages at prompt time, and runs regression cases after wiki changes. It is additive to Codex's built-in memory. ChatGPT Work, cloud runs, and other devices need separate integration and coverage tests.
+The [optional Codex connection](integrations/codex/README.md) installs global guidance plus `UserPromptSubmit` and `Stop` hooks. In this project's local setup, a fresh Codex chat has already used the global guidance to search the private vault. The installed hooks have **not** yet been observed firing in a fresh chat; Codex requires review and trust of new hooks. Until that check succeeds, automatic turn capture and prompt-time injection are pending, even though agent-directed lookup works.
+
+| Moment | Private vault and Obsidian | Evaluation signal |
+| --- | --- | --- |
+| A supported local prompt arrives, once hooks are trusted | Store up to 64 KB of prompt text in a compressed `raw/inbox/` turn record; search the wiki and offer up to two candidate pages. | Record retrieval latency, page IDs, and errors for this turn. |
+| Codex identifies a durable, user-stated fact, decision, preference, or correction | Register the inbox record or original document in `raw/sources.jsonl`; update a cited Markdown page in `wiki/`. Obsidian displays the changed files and links automatically. | Add a private, source-grounded retrieval case for substantive wiki or relationship changes. This is agent work, not an automatic fact extractor. |
+| The turn ends | Append bounded final-answer text to the private turn record. If the wiki or source catalog changed, run the private retrieval regression suite. | Append `evals/live.jsonl` telemetry and write `evals/latest.json` for a detected change. A failure can be fixed before the task finishes. |
+
+The regression cases check retrieval, graph traversal, and source integrity. They do **not** grade the generated answer or prove an improvement over Codex's built-in memory. That requires the [paired fresh-chat eval](evals/README.md), with both conditions using the same existing Codex memory settings. Uploaded attachments and full historical transcripts are outside the hook's capture scope. This connection is for supported **local Codex** sessions; ChatGPT Work, cloud runs, and other devices need separate integration and coverage tests.
 
 ## Use with your own vault
 
