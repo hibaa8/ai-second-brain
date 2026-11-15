@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {"kind": "search", "name": "Find who joined Orbit", "query": "Who joined Project Orbit?", "expected_page": "wiki/people/alex", "top_k": 3},
+    {"kind": "search", "name": "Find Atlas program", "query": "Which program contains Orbit?", "expected_page": "wiki/projects/atlas", "top_k": 3},
+    {"kind": "search", "name": "Find pilot decision", "query": "What was the Orbit rollout decision?", "expected_page": "wiki/decisions/orbit-pilot", "top_k": 3},
+    {"kind": "search", "name": "Find Alex by name", "query": "Alex Example", "expected_page": "wiki/people/alex", "top_k": 3},
+    {"kind": "walk", "name": "Alex to Orbit", "seed": "wiki/people/alex", "expected_page": "wiki/projects/orbit", "max_hops": 1},
+    {"kind": "walk", "name": "Alex to Atlas", "seed": "wiki/people/alex", "expected_page": "wiki/projects/atlas", "max_hops": 2},
+    {"kind": "walk", "name": "Alex to pilot decision", "seed": "wiki/people/alex", "expected_page": "wiki/decisions/orbit-pilot", "max_hops": 2},
+    {"kind": "source", "name": "Verify pilot source", "source_id": "src-80712d1c1265accb", "contains": "small pilot before a wider release"}
+  ]
+}
