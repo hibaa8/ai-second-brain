@@ -48,6 +48,9 @@ def add_source(vault: Path, file: Path, title: str | None) -> dict:
     file = file.expanduser().resolve()
     if not file.is_file():
         raise ValueError(f"No such file: {file}")
+    if file.is_relative_to((vault.expanduser().resolve() / "raw" / "inbox")):
+        raise ValueError("Do not register a mutable hook inbox file directly. "
+                         "After the turn completes, use `ingest` for an immutable copy.")
     digest = sha256(file)
     records = source_records(vault)
     for record in records:
@@ -101,12 +104,14 @@ def ingest_file(vault: Path, file: Path, title: str | None = None,
     records = source_records(vault)
     existing = next((r for r in records if r["sha256"] == digest), None)
     raw = vault / "raw"
-    if existing and source_path(vault, existing["location"]).resolve().is_relative_to(raw):
+    immutable = (raw / "objects", raw / "chats")
+    if existing and any(source_path(vault, existing["location"]).resolve().is_relative_to(root)
+                        for root in immutable):
         if source_path(vault, existing["location"]).is_file():
             if sha256(source_path(vault, existing["location"])) != digest:
                 raise ValueError(f"Stored source {existing['id']} changed since registration")
             return {**existing, "already_stored": True}
-    if file.is_relative_to(raw):
+    if any(file.is_relative_to(root) for root in immutable):
         stored = file
     else:
         suffix = file.suffix.lower()
@@ -256,14 +261,14 @@ def validate(vault: Path) -> list[str]:
             continue
         try:
             meta, body, relations, links = parse_page(path)
-            pages.append((path, meta, relations, links))
+            pages.append((path, meta, body, relations, links))
         except (ValueError, UnicodeError) as exc:
             errors.append(f"{path.relative_to(vault)}: {exc}")
-    page_ids = [meta["id"] for _, meta, _, _ in pages]
+    page_ids = [meta["id"] for _, meta, _, _, _ in pages]
     if len(page_ids) != len(set(page_ids)):
         errors.append("wiki: duplicate page ID")
     known = set(page_ids)
-    for path, meta, relations, links in pages:
+    for path, meta, body, relations, links in pages:
         label = str(path.relative_to(vault))
         expected = path.relative_to(vault).with_suffix("").as_posix()
         if meta["id"] != expected:
@@ -272,9 +277,15 @@ def validate(vault: Path) -> list[str]:
             date.fromisoformat(meta["updated"])
         except ValueError:
             errors.append(f"{label}: invalid updated date")
-        for source in [s.strip() for s in meta["sources"].split(",") if s.strip()]:
+        declared_sources = {s.strip() for s in meta["sources"].split(",") if s.strip()}
+        for source in declared_sources:
             if source not in source_ids:
                 errors.append(f"{label}: unknown source {source}")
+        for source in set(re.findall(r"`(src-[0-9a-f]{16})`", body)):
+            if source not in source_ids:
+                errors.append(f"{label}: unknown cited source {source}")
+            elif source not in declared_sources:
+                errors.append(f"{label}: cited source {source} missing from frontmatter")
         for target in links:
             if target not in known:
                 errors.append(f"{label}: broken link [[{target}]]")

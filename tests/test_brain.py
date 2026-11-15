@@ -60,6 +60,18 @@ class BrainTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed since import"):
             brain.import_chat(self.vault, export)
 
+    def test_ingest_copies_mutable_inbox_before_cataloging(self):
+        inbox = self.vault / "raw" / "inbox" / "turn.json.gz"
+        inbox.parent.mkdir(parents=True)
+        inbox.write_bytes(b"prompt")
+        with self.assertRaisesRegex(ValueError, "mutable hook inbox"):
+            brain.add_source(self.vault, inbox, None)
+        stored = brain.ingest_file(self.vault, inbox)
+        self.assertIn("raw/objects/", stored["location"])
+        inbox.write_bytes(b"prompt and final answer")
+        self.assertEqual((self.vault / stored["location"]).read_bytes(), b"prompt")
+        self.assertEqual(brain.validate(self.vault), [])
+
     def test_search_and_bounded_relationship_walk(self):
         brain.build_index(self.vault)
         hits = brain.search(self.vault, "pilot")
@@ -92,6 +104,13 @@ class BrainTests(unittest.TestCase):
         source.write_text(source.read_text() + "\nAn unregistered edit.\n")
         self.assertTrue(any("changed since registration" in error
                             for error in brain.validate(self.vault)))
+
+    def test_cited_source_must_be_declared(self):
+        person = self.vault / "wiki" / "people" / "alex.md"
+        person.write_text(person.read_text() + "\nSource: `src-80712d1c1265accb`.\n")
+        self.assertEqual(brain.validate(self.vault), [])
+        person.write_text(person.read_text().replace("sources: src-80712d1c1265accb", "sources: src-missing"))
+        self.assertTrue(any("cited source" in error for error in brain.validate(self.vault)))
 
 
 if __name__ == "__main__":
