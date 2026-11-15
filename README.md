@@ -53,7 +53,7 @@ Open `graph-current.svg` in Obsidian or any browser. Rerun the command after wik
 | [Chhikara et al., *Mem0*](https://arxiv.org/abs/2504.19413) | Long-term memory needs extraction, consolidation, and retrieval across conversations; the paper also explores graph memory. | Research context for later chat capture and evaluation, not a dependency or claimed benchmark result. |
 | [SQLite, *FTS5 Extension*](https://www.sqlite.org/fts5.html) | A local full-text index can retrieve candidate pages without embedding every source. | The CLI rebuilds FTS5 from the Markdown wiki. |
 
-These sources shaped the design; this repository is an independent implementation. [PLAN.md](PLAN.md) records the tradeoffs and planned evaluation.
+These sources shaped the design; this repository is an independent implementation. [The evaluation guide](evals/README.md) describes how to measure its effect.
 
 ## Try the fictional demo
 
@@ -94,7 +94,7 @@ The regression cases check retrieval, graph traversal, and source integrity. The
 4. Ask Codex to use the **brain-capture** skill to create or update source-backed pages, then run `check` and `index`.
 5. Ask a question with the **brain-recall** skill. It searches first, traverses typed relationships only when useful, and synthesizes a cited answer.
 
-See [SCHEMA.md](SCHEMA.md) for page and relationship conventions and [PLAN.md](PLAN.md) for scope and future work.
+See [SCHEMA.md](SCHEMA.md) for page and relationship conventions and [the evaluation guide](evals/README.md) for how to test memory performance.
 
 ## Boundaries
 
