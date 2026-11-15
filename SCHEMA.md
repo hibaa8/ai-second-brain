@@ -2,7 +2,7 @@
 
 ## Source catalog
 
-`raw/sources.jsonl` has one JSON object per original. `brain.py ingest` copies a file into `raw/objects/` and catalogs `id`, `title`, `location`, `sha256`, `bytes`, and `registered_at`. The ID is based on the content hash, so importing identical bytes again reuses the stored source. Files already under `raw/` are cataloged in place. If an external source was previously registered, ingestion upgrades its catalog entry to the stored copy while retaining `original_location`.
+`raw/sources.jsonl` has one JSON object per original. `brain.py ingest` copies a file into `raw/objects/` and catalogs `id`, `title`, `location`, `sha256`, `bytes`, and `registered_at`. The ID is based on the content hash, so importing identical bytes again reuses the stored source. Files already under immutable `raw/objects/` or `raw/chats/` are cataloged in place. Other files under `raw/`, including hook inbox records, are copied before registration because they may still change. If an external source was previously registered, ingestion upgrades its catalog entry to the stored copy while retaining `original_location`.
 
 `brain.py source` is a reference-only alternative: it catalogs a file without copying it. Its absolute location can point to a separate private archive, but it is not a backup. `ingest` defaults to a 50 MB per-file limit; raise `--max-mb` deliberately for larger originals, or use a separately backed-up archive and `source`. The vault itself still needs backup.
 
