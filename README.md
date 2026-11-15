@@ -76,7 +76,7 @@ Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke 
 
 ## Live local Codex use
 
-The [optional Codex connection](integrations/codex/README.md) installs global guidance plus `UserPromptSubmit` and `Stop` hooks. In this project's local setup, a fresh Codex chat has used the global guidance to search the private vault, and a later desktop prompt produced a private inbox record through the prompt hook. End-of-turn capture and telemetry still need an observed `Stop` run. Hook coverage depends on the Codex client and trust state, so verify it with the steps in the integration guide.
+The [optional Codex connection](integrations/codex/README.md) installs global guidance plus `UserPromptSubmit` and `Stop` hooks. In this project's local setup, fresh local Codex CLI turns have now verified prompt capture, relevant page retrieval, final-answer capture, and private telemetry. A desktop prompt has also produced a private inbox record; desktop `Stop` dispatch has not yet been observed. Hook coverage depends on the Codex client and trust state, so verify it with the steps in the integration guide.
 
 | Moment | Private vault and Obsidian | Evaluation signal |
 | --- | --- | --- |
