@@ -2,6 +2,10 @@
 
 Run the read-only smoke eval with `python3 evals/run.py`. It checks whether full-text search returns expected pages, whether typed graph traversal reaches expected pages within a hop limit, and whether cited source text is available with the registered hash. It builds a temporary index and leaves the selected vault and its normal index untouched. The demo is tiny and fictional; its score is a software smoke check, not a measure of personal-memory effectiveness.
 
+For each supported local turn, `evals/live.jsonl` in the private vault records offered pages and any source-backed page citations found in the final answer. `evals/usage.jsonl` and `evals/USAGE.md` retain the page, registered original, source-integrity result, and the surrounding claim. `evals/LIVE_REPORT.md` is regenerated after each completed turn and summarizes capture, retrieval, citation, and regression counts. This is a live attribution trace: retrieval is not counted as use, and use is not scored as correct merely because a citation appears. Review the original source when scoring the claim. An answer that uses the vault without citing it will be absent from this log, so citation coverage also needs auditing.
+
+For example, a **fictional** answer that says the team chose a small pilot and cites `wiki/decisions/orbit-pilot` beside `src-80712d1c1265accb` creates a usage row with that claim and a hash check of the original. If the prompt hook merely offered the page, no usage row is created.
+
 To run a private case set, keep its JSON outside this public repository and pass `--vault /path/to/private-vault --cases /path/to/private-cases.json`.
 
 ## Future paired answer eval
