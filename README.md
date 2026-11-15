@@ -7,7 +7,7 @@ This is an original, small implementation inspired by [Karpathy's LLM Wiki](http
 ## What it does
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph private["Private sources and Obsidian vault"]
         S["Original documents or selected chats"] --> C["Source catalog<br/>ID · hash · location"]
         C --> W["Codex capture<br/>and validation"]
