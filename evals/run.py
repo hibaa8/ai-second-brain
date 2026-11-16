@@ -58,19 +58,22 @@ def evaluate(vault: Path, cases: dict) -> dict:
                 pages = [item["id"] for item in recalled_pages(vault, case["query"])]
                 now = datetime.fromisoformat(case["now"]) if case.get("now") else None
                 chat_day, chats = recalled_chats(vault, case["query"], now)
-                raw = ([item["source"] for item in recalled_raw_chats(vault, case["query"])]
-                       if not pages and not chats else [])
+                raw_hits = recalled_raw_chats(vault, case["query"]) if not pages and not chats else []
+                raw = [item["source"] for item in raw_hits]
                 if case.get("expected_none"):
                     passed = not pages and not chats and not raw
                 elif case.get("expected_page"):
                     passed = case["expected_page"] in pages[:case.get("top_k", 2)]
                 elif case.get("expected_raw_source"):
                     passed = case["expected_raw_source"] in raw
+                elif case.get("expected_raw_thread"):
+                    passed = case["expected_raw_thread"] in [item["thread_id"] for item in raw_hits]
                 else:
                     passed = (chat_day == case["expected_chat_day"]
                               and len(chats) >= case.get("min_chat_count", 1))
                 detail = {"returned_pages": pages, "chat_day": chat_day,
-                          "chat_count": len(chats), "raw_sources": raw}
+                          "chat_count": len(chats), "raw_sources": raw,
+                          "raw_threads": [item["thread_id"] for item in raw_hits]}
             else:
                 raise ValueError(f"Unknown case kind: {kind}")
             results.append({"name": case["name"], "kind": kind, "passed": passed,

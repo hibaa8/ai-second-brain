@@ -274,7 +274,7 @@ def read_pages(vault: Path) -> list[dict]:
     return result
 
 
-def validate(vault: Path) -> list[str]:
+def validate(vault: Path, *, verify_hashes: bool = True) -> list[str]:
     errors = []
     records = source_records(vault)
     source_ids = [r.get("id") for r in records]
@@ -287,7 +287,7 @@ def validate(vault: Path) -> list[str]:
         path = source_path(vault, record["location"])
         if not path.is_file() and path.resolve().is_relative_to((vault / "raw").resolve()):
             errors.append(f"raw/sources.jsonl: stored source {record['id']} is missing")
-        elif path.is_file() and sha256(path) != record["sha256"]:
+        elif verify_hashes and path.is_file() and sha256(path) != record["sha256"]:
             errors.append(f"raw/sources.jsonl: source {record['id']} changed since registration")
     pages = []
     for path in sorted((vault / "wiki").rglob("*.md")):
@@ -343,6 +343,14 @@ def db_path(vault: Path) -> Path:
     return vault.parent / ".brain-index" / f"{vault.name}.sqlite3"
 
 
+def chat_titles(vault: Path) -> dict[str, str]:
+    path = vault / "raw" / "chat_threads.json"
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {thread: item.get("title", "") for thread, item in data.items()}
+
+
 def build_index(vault: Path) -> dict:
     errors = validate(vault)
     if errors:
@@ -359,8 +367,8 @@ def build_index(vault: Path) -> dict:
             DROP TABLE IF EXISTS pages;
             CREATE TABLE pages(id TEXT PRIMARY KEY, title TEXT, kind TEXT, updated TEXT, path TEXT, body TEXT);
             CREATE VIRTUAL TABLE pages_fts USING fts5(id UNINDEXED, title, body);
-            CREATE TABLE chats(source_id TEXT PRIMARY KEY, thread_id TEXT, created_at TEXT, role TEXT, path TEXT, body TEXT);
-            CREATE VIRTUAL TABLE chats_fts USING fts5(source_id UNINDEXED, body);
+            CREATE TABLE chats(source_id TEXT PRIMARY KEY, thread_id TEXT, title TEXT, created_at TEXT, role TEXT, path TEXT, body TEXT);
+            CREATE VIRTUAL TABLE chats_fts USING fts5(source_id UNINDEXED, title, body);
             CREATE TABLE edges(origin TEXT, relation TEXT, target TEXT, source TEXT, observed TEXT, status TEXT);
             CREATE INDEX edges_origin ON edges(origin);
             CREATE INDEX edges_target ON edges(target);
@@ -376,15 +384,17 @@ def build_index(vault: Path) -> dict:
                            (meta["id"], rel["type"], rel["target"], rel["source"],
                             rel["observed"], rel["status"]))
         chat_count = 0
+        titles = chat_titles(vault)
         for record in source_records(vault):
             if not record["location"].startswith("raw/chats/"):
                 continue
             path = source_path(vault, record["location"])
             message = json.loads(path.read_text(encoding="utf-8"))
-            row = (record["id"], message["thread_id"], message.get("created_at", ""),
+            title = titles.get(message["thread_id"], "")
+            row = (record["id"], message["thread_id"], title, message.get("created_at", ""),
                    message["role"], str(path), message["text"])
-            db.execute("INSERT INTO chats VALUES (?,?,?,?,?,?)", row)
-            db.execute("INSERT INTO chats_fts VALUES (?,?)", (record["id"], message["text"]))
+            db.execute("INSERT INTO chats VALUES (?,?,?,?,?,?,?)", row)
+            db.execute("INSERT INTO chats_fts VALUES (?,?,?)", (record["id"], title, message["text"]))
             chat_count += 1
         db.commit()
         edge_count = db.execute("SELECT count(*) FROM edges").fetchone()[0]
@@ -399,6 +409,56 @@ def connect_index(vault: Path) -> sqlite3.Connection:
     db = sqlite3.connect(target)
     db.row_factory = sqlite3.Row
     return db
+
+
+def refresh_chat_index(vault: Path) -> dict:
+    """Add newly registered immutable chats without rebuilding the wiki index."""
+    with connect_index(vault) as db:
+        existing = {row[0] for row in db.execute("SELECT source_id FROM chats")}
+        titles = chat_titles(vault)
+        added = 0
+        for record in source_records(vault):
+            if not record["location"].startswith("raw/chats/") or record["id"] in existing:
+                continue
+            path = source_path(vault, record["location"])
+            if not path.is_file() or sha256(path) != record["sha256"]:
+                raise ValueError(f"New chat source missing or changed: {record['id']}")
+            message = json.loads(path.read_text(encoding="utf-8"))
+            title = titles.get(message["thread_id"], "")
+            db.execute("INSERT INTO chats VALUES (?,?,?,?,?,?,?)",
+                       (record["id"], message["thread_id"], title, message.get("created_at", ""),
+                        message["role"], str(path), message["text"]))
+            db.execute("INSERT INTO chats_fts VALUES (?,?,?)", (record["id"], title, message["text"]))
+            added += 1
+        db.commit()
+        return {"added": added, "indexed": len(existing) + added}
+
+
+def refresh_wiki_index(vault: Path) -> dict:
+    """Refresh curated pages and graph edges without reindexing raw chats."""
+    errors = validate(vault, verify_hashes=False)
+    if errors:
+        raise ValueError("\n".join(errors))
+    pages = read_pages(vault)
+    with connect_index(vault) as db:
+        db.execute("DELETE FROM pages_fts")
+        db.execute("DELETE FROM edges")
+        db.execute("DELETE FROM pages")
+        edge_count = 0
+        for page in pages:
+            meta = page["meta"]
+            db.execute("INSERT INTO pages VALUES (?,?,?,?,?,?)",
+                       (meta["id"], meta["title"], meta["kind"], meta["updated"],
+                        str(page["path"]), page["body"]))
+            db.execute("INSERT INTO pages_fts VALUES (?,?,?)",
+                       (meta["id"], meta["title"], page["body"]))
+            for relation in page["relations"]:
+                db.execute("INSERT INTO edges VALUES (?,?,?,?,?,?)",
+                           (meta["id"], relation["type"], relation["target"], relation["source"],
+                            relation["observed"], relation["status"]))
+                edge_count += 1
+        db.commit()
+    return {"pages": len(pages), "edges": edge_count}
 
 
 def search(vault: Path, query: str, limit: int = 10) -> list[dict]:
@@ -425,9 +485,9 @@ def search_chats(vault: Path, query: str, limit: int = 10, role: str = "user") -
     expression = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms)
     with connect_index(vault) as db:
         rows = db.execute("""
-            SELECT c.source_id, c.thread_id, c.created_at, c.role, c.path,
-                   snippet(chats_fts, 1, '[', ']', ' … ', 24) AS excerpt,
-                   bm25(chats_fts) AS rank
+            SELECT c.source_id, c.thread_id, c.title, c.created_at, c.role, c.path,
+                   snippet(chats_fts, 2, '[', ']', ' … ', 24) AS excerpt,
+                   bm25(chats_fts, 0.0, 2.0, 4.0) AS rank
             FROM chats_fts JOIN chats c ON c.source_id = chats_fts.source_id
             WHERE chats_fts MATCH ? AND c.role = ? ORDER BY rank LIMIT ?
         """, (expression, role, limit)).fetchall()
@@ -516,7 +576,8 @@ def main() -> int:
                 raise ValueError("--max-mb must be positive")
             result = ingest_file(vault, args.file, args.title, args.max_mb * 1024 * 1024)
         elif args.command == "chat-import":
-            result = import_chat(vault, args.file)
+            result = {key: value for key, value in import_chat(vault, args.file).items()
+                      if key not in {"source_ids", "locations"}}
         elif args.command == "check":
             errors = validate(vault)
             result = {"ok": not errors, "errors": errors}

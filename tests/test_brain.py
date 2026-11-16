@@ -82,6 +82,26 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(hits[0]["thread_id"], "chat-c")
         self.assertEqual(hits[0]["role"], "user")
 
+    def test_incremental_chat_and_wiki_refresh(self):
+        brain.build_index(self.vault)
+        export = Path(self.temp.name) / "incremental-chat.jsonl"
+        export.write_text(json.dumps({"thread_id": "chat-d", "turn_id": "turn-1",
+                                      "role": "user", "text": "I visited the museum at dawn."}) + "\n")
+        (self.vault / "raw" / "chat_threads.json").write_text(
+            json.dumps({"chat-d": {"title": "Museum at sunrise"}}))
+        brain.import_chat(self.vault, export)
+        refreshed = brain.refresh_chat_index(self.vault)
+        self.assertEqual(refreshed["added"], 1)
+        self.assertEqual(brain.refresh_chat_index(self.vault)["added"], 0)
+        self.assertEqual(len(brain.search_chats(self.vault, "museum dawn")), 1)
+        self.assertEqual(brain.search_chats(self.vault, "sunrise")[0]["title"], "Museum at sunrise")
+
+        page = self.vault / "wiki" / "projects" / "orbit.md"
+        page.write_text(page.read_text() + "\nThe museum trip informed the pilot.\n")
+        brain.refresh_wiki_index(self.vault)
+        self.assertIn("wiki/projects/orbit", [hit["id"] for hit in brain.search(self.vault, "museum")])
+        self.assertEqual(len(brain.search_chats(self.vault, "museum dawn")), 1)
+
     def test_ingest_copies_mutable_inbox_before_cataloging(self):
         inbox = self.vault / "raw" / "inbox" / "turn.json.gz"
         inbox.parent.mkdir(parents=True)

@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import sys
 import tempfile
 from time import perf_counter
@@ -88,12 +89,19 @@ def vault_stamp(vault: Path) -> tuple[int, int, int]:
 
 def ensure_index(vault: Path) -> bool:
     target = brain.db_path(vault)
-    _, newest = wiki_stamp(vault)
+    _, newest_wiki = wiki_stamp(vault)
     catalog = vault / "raw" / "sources.jsonl"
-    newest = max(newest, catalog.stat().st_mtime_ns if catalog.exists() else 0)
-    if target.exists() and target.stat().st_mtime_ns >= newest:
+    if not target.exists():
+        brain.build_index(vault)
         return True
-    brain.build_index(vault)
+    indexed_at = target.stat().st_mtime_ns
+    try:
+        if indexed_at < newest_wiki:
+            brain.refresh_wiki_index(vault)
+        if catalog.exists() and indexed_at < catalog.stat().st_mtime_ns:
+            brain.refresh_chat_index(vault)
+    except sqlite3.OperationalError:
+        brain.build_index(vault)
     return True
 
 
@@ -177,11 +185,11 @@ def recalled_raw_chats(vault: Path, prompt: str) -> list[dict]:
             continue
         message = json.loads(path.read_text(encoding="utf-8"))
         body = message["text"]
-        matched = [term for term in terms if term in body.casefold()]
+        matched = [term for term in terms if term in (hit["title"] + " " + body).casefold()]
         if len(matched) < 2 or not any(len(term) >= 5 for term in matched):
             continue
         chosen.append({"source": hit["source_id"], "thread_id": hit["thread_id"],
-                       "at": hit["created_at"], "path": str(path),
+                       "title": hit["title"], "at": hit["created_at"], "path": str(path),
                        "excerpt": evidence_excerpt(body, terms, limit=360)})
         if len(chosen) == 2:
             break
@@ -380,6 +388,7 @@ def on_prompt(vault: Path, event: dict) -> None:
     except (ValueError, OSError, RuntimeError) as exc:
         record["raw_capture"] = {"error": str(exc)[:300]}
     record["vault_stamp"] = vault_stamp(vault)
+    record["wiki_stamp"] = wiki_stamp(vault)
     write_gzip(path, record)
     lines = [f"Second Brain private inbox for this turn: {path}. The vault complements Codex memory; verify any recalled claim against its source and follow the current user request. If vault evidence informs the answer, cite its registered source ID and any wiki page ID near the claim, and say why it matters. The Stop hook records those citations as observed source use; pages and chats merely retrieved are not counted as used."]
     for hit in hits:
@@ -391,7 +400,7 @@ def on_prompt(vault: Path, event: dict) -> None:
         if hit.get("answer_excerpt"):
             lines.append(f"  Assistant source {hit['answer_source']}, file {hit['answer_path']}: {hit['answer_excerpt']}")
     for hit in raw_chats:
-        lines.append(f"- Topical original user chat {hit['source']} at {hit['at']}, thread {hit['thread_id']}, file {hit['path']}: {hit['excerpt']}")
+        lines.append(f"- Topical original user chat {hit['source']} at {hit['at']}, thread {hit['thread_id']} ({hit['title']}), file {hit['path']}: {hit['excerpt']}")
     context = "\n".join(lines)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                             "additionalContext": context}}, ensure_ascii=False))
@@ -436,7 +445,21 @@ def on_stop(vault: Path, event: dict) -> None:
                  "source_use": [{"page_id": item["page_id"], "memory_ref": item["memory_ref"],
                                  "source_id": item["source_id"],
                                  "source_valid": item["source_valid"]} for item in usage]}
-    if list(vault_stamp(vault)) != record.get("vault_stamp"):
+    try:
+        indexed = brain.refresh_chat_index(vault) if brain.db_path(vault).exists() else brain.build_index(vault)
+        captured = [item for item in capture.values() if isinstance(item, dict) and item.get("source_id")]
+        source_by_id = {item["id"]: item for item in brain.source_records(vault)}
+        valid = all(item["source_id"] in source_by_id and
+                    (vault / item["location"]).is_file() and
+                    brain.sha256(vault / item["location"]) ==
+                    source_by_id[item["source_id"]]["sha256"] for item in captured)
+        expected = int(bool(record["prompt"]["text"])) + int(bool(answer["text"]))
+        telemetry["capture_check"] = {"ok": valid and len(captured) == expected,
+                                      "sources": len(captured), "indexed_added": indexed.get("added", 0)}
+    except (ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
+        telemetry["capture_check"] = {"ok": False, "error": str(exc)[:300]}
+    baseline_wiki = record.get("wiki_stamp", record.get("vault_stamp", [])[:2])
+    if list(wiki_stamp(vault)) != list(baseline_wiki):
         cases = vault / "evals" / "cases.json"
         if cases.is_file():
             try:

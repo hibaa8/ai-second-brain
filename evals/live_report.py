@@ -21,6 +21,7 @@ def summarize(vault: Path) -> str:
     capture_errors = sum(bool(row.get("raw_capture", {}).get("error") or
                               row.get("raw_capture", {}).get("user_error") or
                               row.get("raw_capture", {}).get("assistant_error")) for row in rows)
+    capture_checks = [row["capture_check"] for row in rows if "capture_check" in row]
     instrumented = [row for row in rows if "source_use" in row]
     cited = sum(bool(row["source_use"]) for row in instrumented)
     pairs = [entry for row in rows for entry in row.get("source_use", [])]
@@ -36,6 +37,7 @@ def summarize(vault: Path) -> str:
              f"| User turns registered as raw sources | {saved_user} |",
              f"| Final answers registered as raw sources | {saved_answer} |",
              f"| Turns with raw-capture errors | {capture_errors} |",
+             f"| Per-turn source/index checks passing | {sum(x.get('ok') is True for x in capture_checks)}/{len(capture_checks)} |",
              f"| Turns with source-use instrumentation | {len(instrumented)} |",
              f"| Turns citing a registered original | {cited} |",
              f"| Cited original references | {len(pairs)} |",

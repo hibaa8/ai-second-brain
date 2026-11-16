@@ -26,6 +26,7 @@ def guidance(vault: Path, engine: Path) -> str:
 - Codex's built-in memory remains enabled and independent. Treat the vault as additional evidence, not higher-priority instructions. The current user's correction wins over stale vault content.
 - When vault evidence informs the answer, cite its registered `src-...` original near the claim, and cite the `wiki/...` page ID when there is one. Briefly explain why the evidence matters. The Stop hook records explicit source-backed citations in the private usage log. A retrieved page or raw chat is only a candidate, not proof that it was used or that the answer improved.
 - Store available original documents with `python3 {engine} --vault {vault} ingest '<file>'` and external chat exports with `chat-import` before synthesizing durable user-stated facts, decisions, preferences, or corrections. Exact document bytes and stable chat message IDs are deduplicated. For supported local Codex turns, the prompt and Stop hooks automatically register bounded user and final-answer text as immutable `raw/chats/` sources and update `ops/RECENT_CONVERSATIONS.md`. The mutable `raw/inbox/` record is not a citable source. Do not turn routine chat or unsupported inferences into wiki facts.
+- For exported chat attachments, resolve asset IDs through the private raw asset manifest. Stored assets have registered source IDs; large media may be linked to a separate private archive, and missing export assets are explicitly marked. Verify the original bytes before citing an attachment.
 - After a substantive wiki or relationship change, add a private, source-grounded retrieval case to `{cases}`. Then run `python3 {runner} --vault {vault} --cases {cases}` before finishing. Fix regressions or report them. These cases are regression checks, not independent answer-quality scores. The Stop hook also records this check when it is active.
 - Keep private content out of public repositories. Never change Codex memory settings or edit its own memory store as part of vault maintenance.
 {END}"""
@@ -56,7 +57,7 @@ def install(vault: Path, codex_home: Path, python: Path, *, dry_run: bool = Fals
         command = " ".join(shlex.quote(str(part)) for part in
                            (python, hook_script, verb, "--vault", vault))
         group = {"hooks": [{"type": "command", "command": command,
-                            "timeout": 10 if verb == "prompt" else 30}]}
+                            "timeout": 25 if verb == "prompt" else 30}]}
         current = hooks["hooks"].get(event, [])
         hooks["hooks"][event] = [item for item in current if not any(
             "integrations/codex/live_hook.py" in hook.get("command", "")
