@@ -15,6 +15,7 @@ def summarize(vault: Path) -> str:
     rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
             if line.strip()] if log.exists() else []
     offered = sum(bool(row.get("retrieved_pages")) for row in rows)
+    offered_raw = sum(bool(row.get("retrieved_raw_chat_sources")) for row in rows)
     instrumented = [row for row in rows if "source_use" in row]
     cited = sum(bool(row["source_use"]) for row in instrumented)
     pairs = [entry for row in rows for entry in row.get("source_use", [])]
@@ -26,6 +27,7 @@ def summarize(vault: Path) -> str:
              "| Signal | Count |", "| --- | ---: |",
              f"| Completed turns recorded | {len(rows)} |",
              f"| Turns offered at least one wiki page | {offered} |",
+             f"| Turns offered topical original chats | {offered_raw} |",
              f"| Turns with source-use instrumentation | {len(instrumented)} |",
              f"| Turns citing a registered original | {cited} |",
              f"| Cited original references | {len(pairs)} |",
@@ -38,16 +40,17 @@ def summarize(vault: Path) -> str:
                   f"{latest.get('cases_total', latest.get('total', 0))}** "
                   f"cases; status **{'pass' if latest.get('ok') else 'fail'}**.", ""]
     lines += ["## Recent turns", "",
-              "| Time (UTC) | Pages offered | Sources cited | Regression |",
-              "| --- | ---: | ---: | --- |"]
+              "| Time (UTC) | Pages offered | Topical chats offered | Sources cited | Regression |",
+              "| --- | ---: | ---: | ---: | --- |"]
     for row in rows[-10:]:
         regression = row.get("regression")
         state = (f"{regression.get('passed', 0)}/{regression.get('total', 0)}"
                  if regression else "—")
         lines.append(f"| {row.get('at', '')} | {len(row.get('retrieved_pages', []))} | "
+                     f"{len(row.get('retrieved_raw_chat_sources', []))} | "
                      f"{len(row.get('source_use', []))} | {state} |")
     lines += ["", "Older turns without source-use instrumentation are not counted as uncited. "
-              "A page offered by retrieval is not counted as used. Source use requires a "
+              "A page or raw chat offered by retrieval is not counted as used. Source use requires a "
               "final-answer citation to a registered original; a cited wiki page is linked when available. See "
               "[the usage log](USAGE.md) for the cited claim and why it mattered. "
               "Missing citations can undercount use. These signals do not grade answer correctness "

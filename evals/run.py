@@ -54,19 +54,23 @@ def evaluate(vault: Path, cases: dict) -> dict:
                 detail = {"available": available, "hash_matches": available and brain.sha256(path) == record["sha256"]}
                 passed = passed and detail["hash_matches"]
             elif kind == "hook":
-                from integrations.codex.live_hook import recalled_chats, recalled_pages
+                from integrations.codex.live_hook import recalled_chats, recalled_pages, recalled_raw_chats
                 pages = [item["id"] for item in recalled_pages(vault, case["query"])]
                 now = datetime.fromisoformat(case["now"]) if case.get("now") else None
                 chat_day, chats = recalled_chats(vault, case["query"], now)
+                raw = ([item["source"] for item in recalled_raw_chats(vault, case["query"])]
+                       if not pages and not chats else [])
                 if case.get("expected_none"):
-                    passed = not pages and not chats
+                    passed = not pages and not chats and not raw
                 elif case.get("expected_page"):
                     passed = case["expected_page"] in pages[:case.get("top_k", 2)]
+                elif case.get("expected_raw_source"):
+                    passed = case["expected_raw_source"] in raw
                 else:
                     passed = (chat_day == case["expected_chat_day"]
                               and len(chats) >= case.get("min_chat_count", 1))
                 detail = {"returned_pages": pages, "chat_day": chat_day,
-                          "chat_count": len(chats)}
+                          "chat_count": len(chats), "raw_sources": raw}
             else:
                 raise ValueError(f"Unknown case kind: {kind}")
             results.append({"name": case["name"], "kind": kind, "passed": passed,

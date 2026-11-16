@@ -101,6 +101,8 @@ The regression cases check search, prompt-hook candidate retrieval, dated-chat r
 
 ## Use with your own vault
 
+Imported chats are indexed by their registered original text. If a prompt finds no curated page or dated recap, the hook can offer up to two topical user-chat excerpts with source IDs. The live report tracks those offers separately from final-answer citations. Large media in a chat export can remain in an external archive while selected documents are ingested by content hash.
+
 1. Create a private folder and open it as a vault in Obsidian. Do not place private sources in this public repository.
 2. Copy `SCHEMA.md` and adapt the `AGENTS.md` guidance to the private vault. Keep the initial `wiki/index.md` and `wiki/now.md` short.
 3. Store a raw document: `python3 brain.py --vault /absolute/path/to/vault ingest /absolute/path/to/document --title "Document title"`. The default per-file limit is 50 MB; use `--max-mb` when intentionally storing a larger file. For an original already kept in a separately backed-up private archive, use `source` to reference it without copying.

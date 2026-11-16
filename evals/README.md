@@ -1,5 +1,7 @@
 # Evaluation
 
+The index also covers registered original chat text. When no wiki page or dated recall matches, the prompt hook can offer up to two topical user-chat sources. A private hook case can use `expected_raw_source` to protect this fallback against regressions.
+
 Run the read-only smoke eval with `python3 evals/run.py`. It checks whether full-text search returns expected pages, whether typed graph traversal reaches expected pages within a hop limit, and whether cited source text is available with the registered hash. It builds a temporary index and leaves the selected vault and its normal index untouched. The demo is tiny and fictional; its score is a software smoke check, not a measure of personal-memory effectiveness.
 
 Private case sets can also include `kind: "hook"` with a natural-language `query` and an `expected_page`, `expected_chat_day` plus `min_chat_count`, or `expected_none`. This exercises the prompt hook's actual candidate selection, including paraphrases and no-result controls. A fixed `now` timestamp makes relative-day cases reproducible. These cases catch retrieval regressions but do not generate or grade an agent answer.

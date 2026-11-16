@@ -24,7 +24,9 @@ MAX_TEXT_BYTES = 64_000
 STOPWORDS = {"a", "an", "and", "are", "at", "be", "can", "do", "does", "for", "from",
              "how", "i", "in", "is", "it", "me", "my", "of", "on", "or", "our", "the",
              "this", "to", "was", "we", "what", "when", "where", "which", "who", "with", "you",
-             "available", "evidence", "not", "say", "tell", "that"}
+             "available", "evidence", "not", "say", "tell", "that", "about", "before",
+             "chat", "chats", "conversation", "conversations", "did", "have", "mentioned",
+             "previous", "remember", "why", "looking"}
 SECRET_PATTERNS = (
     re.compile(r"\b(?:sk|ghp|gho|github_pat)_[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
@@ -87,6 +89,8 @@ def vault_stamp(vault: Path) -> tuple[int, int, int]:
 def ensure_index(vault: Path) -> bool:
     target = brain.db_path(vault)
     _, newest = wiki_stamp(vault)
+    catalog = vault / "raw" / "sources.jsonl"
+    newest = max(newest, catalog.stat().st_mtime_ns if catalog.exists() else 0)
     if target.exists() and target.stat().st_mtime_ns >= newest:
         return True
     brain.build_index(vault)
@@ -155,6 +159,30 @@ def recalled_pages(vault: Path, prompt: str) -> list[dict]:
         excerpt = evidence_excerpt(body, terms)
         chosen.append({"id": meta["id"], "title": meta["title"],
                        "sources": meta["sources"], "excerpt": excerpt})
+        if len(chosen) == 2:
+            break
+    return chosen
+
+
+def recalled_raw_chats(vault: Path, prompt: str) -> list[dict]:
+    """Offer original user messages when no curated wiki or date recall matched."""
+    terms = key_terms(prompt)
+    if len(terms) < 2:
+        return []
+    ensure_index(vault)
+    chosen = []
+    for hit in brain.search_chats(vault, " ".join(terms), limit=16):
+        path = Path(hit["path"])
+        if not path.is_file():
+            continue
+        message = json.loads(path.read_text(encoding="utf-8"))
+        body = message["text"]
+        matched = [term for term in terms if term in body.casefold()]
+        if len(matched) < 2 or not any(len(term) >= 5 for term in matched):
+            continue
+        chosen.append({"source": hit["source_id"], "thread_id": hit["thread_id"],
+                       "at": hit["created_at"], "path": str(path),
+                       "excerpt": evidence_excerpt(body, terms, limit=360)})
         if len(chosen) == 2:
             break
     return chosen
@@ -265,6 +293,7 @@ def on_prompt(vault: Path, event: dict) -> None:
     hits = []
     chat_day = None
     chats = []
+    raw_chats = []
     error = None
     try:
         hits = recalled_pages(vault, prompt)
@@ -274,9 +303,15 @@ def on_prompt(vault: Path, event: dict) -> None:
         chat_day, chats = recalled_chats(vault, prompt)
     except (ValueError, OSError, RuntimeError) as exc:
         error = ((error + "; ") if error else "") + str(exc)[:300]
+    if not hits and not chats:
+        try:
+            raw_chats = recalled_raw_chats(vault, prompt)
+        except (ValueError, OSError, RuntimeError) as exc:
+            error = ((error + "; ") if error else "") + str(exc)[:300]
     record["retrieval"] = {"page_ids": [h["id"] for h in hits],
                            "chat_day": chat_day,
                            "chat_sources": [s for h in chats for s in (h["source"], h.get("answer_source")) if s],
+                           "raw_chat_sources": [h["source"] for h in raw_chats],
                            "milliseconds": round((perf_counter() - started) * 1000, 2),
                            "error": error}
     record["vault_stamp"] = vault_stamp(vault)
@@ -290,6 +325,8 @@ def on_prompt(vault: Path, event: dict) -> None:
         lines.append(f"- Chat source {hit['source']} at {hit['at']}, thread {hit['thread_id']}, file {hit['path']}: {hit['excerpt']}")
         if hit.get("answer_excerpt"):
             lines.append(f"  Assistant source {hit['answer_source']}, file {hit['answer_path']}: {hit['answer_excerpt']}")
+    for hit in raw_chats:
+        lines.append(f"- Topical original user chat {hit['source']} at {hit['at']}, thread {hit['thread_id']}, file {hit['path']}: {hit['excerpt']}")
     context = "\n".join(lines)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                             "additionalContext": context}}, ensure_ascii=False))
@@ -314,6 +351,7 @@ def on_stop(vault: Path, event: dict) -> None:
     telemetry = {"at": stamp(), "session_id": event.get("session_id"),
                  "turn_id": event.get("turn_id"), "retrieved_pages": record["retrieval"]["page_ids"],
                  "retrieved_chat_sources": record["retrieval"].get("chat_sources", []),
+                 "retrieved_raw_chat_sources": record["retrieval"].get("raw_chat_sources", []),
                  "retrieval_ms": record["retrieval"]["milliseconds"],
                  "retrieval_error": record["retrieval"]["error"],
                  "prompt_bytes": record["prompt"]["bytes"], "answer_bytes": answer["bytes"],

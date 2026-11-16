@@ -1,5 +1,7 @@
 # Vault schema
 
+The disposable SQLite index contains both curated wiki pages and registered original chat messages. Prompt-hook recall searches the wiki first, then offers bounded topical original user messages when no wiki or dated-chat candidate matches. Raw-chat search results retain their registered source IDs for citation and usage tracking.
+
 ## Source catalog
 
 `raw/sources.jsonl` has one JSON object per original. `brain.py ingest` copies a file into `raw/objects/` and catalogs `id`, `title`, `location`, `sha256`, `bytes`, and `registered_at`. The ID is based on the content hash, so importing identical bytes again reuses the stored source. Files already under immutable `raw/objects/` or `raw/chats/` are cataloged in place. Other files under `raw/`, including hook inbox records, are copied before registration because they may still change. If an external source was previously registered, ingestion upgrades its catalog entry to the stored copy while retaining `original_location`.

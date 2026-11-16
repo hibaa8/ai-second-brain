@@ -60,6 +60,28 @@ class BrainTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed since import"):
             brain.import_chat(self.vault, export)
 
+    def test_chat_import_preserves_unicode_line_separator_inside_json_string(self):
+        export = Path(self.temp.name) / "unicode-chat.jsonl"
+        message = {"thread_id": "chat-b", "turn_id": "turn-1", "role": "user",
+                   "text": "First paragraph\u2028second paragraph"}
+        export.write_text(json.dumps(message, ensure_ascii=False) + "\n", encoding="utf-8")
+        result = brain.import_chat(self.vault, export)
+        self.assertEqual(result["added"], 1)
+        stored = next((self.vault / "raw" / "chats").rglob("*.json"))
+        self.assertEqual(json.loads(stored.read_text())["text"], message["text"])
+
+    def test_registered_raw_chats_are_searchable_after_indexing(self):
+        export = Path(self.temp.name) / "chat-search.jsonl"
+        export.write_text(json.dumps({"thread_id": "chat-c", "turn_id": "turn-1",
+                                      "role": "user", "text": "I visited the museum at dawn.",
+                                      "created_at": "2026-09-12T08:00:00Z"}) + "\n")
+        brain.import_chat(self.vault, export)
+        brain.build_index(self.vault)
+        hits = brain.search_chats(self.vault, "museum dawn")
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["thread_id"], "chat-c")
+        self.assertEqual(hits[0]["role"], "user")
+
     def test_ingest_copies_mutable_inbox_before_cataloging(self):
         inbox = self.vault / "raw" / "inbox" / "turn.json.gz"
         inbox.parent.mkdir(parents=True)

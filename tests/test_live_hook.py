@@ -136,6 +136,27 @@ class LiveHookTests(unittest.TestCase):
         self.assertTrue(report["ok"])
         self.assertEqual(report["cases_passed"], 2)
 
+    def test_prompt_hook_falls_back_to_registered_raw_chat(self):
+        export = Path(self.temp.name) / "raw-fallback.jsonl"
+        export.write_text(json.dumps({"thread_id": "chat-c", "turn_id": "turn-1",
+                                      "role": "user", "text": "I visited the museum at dawn.",
+                                      "created_at": "2026-09-12T08:00:00Z"}) + "\n")
+        live_hook.brain.import_chat(self.vault, export)
+        matches = live_hook.recalled_raw_chats(self.vault, "Did I visit the museum at dawn?")
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["thread_id"], "chat-c")
+        self.assertEqual(live_hook.recalled_raw_chats(self.vault, "What is my dog's name?"), [])
+        event = {"session_id": "raw-fallback", "turn_id": "turn-1",
+                 "prompt": "Did I visit the museum at dawn?"}
+        out = StringIO()
+        with redirect_stdout(out):
+            live_hook.on_prompt(self.vault, event)
+        context = json.loads(out.getvalue())["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Topical original user chat", context)
+        self.assertIn(matches[0]["source"], context)
+        self.assertEqual(live_hook.read_gzip(live_hook.event_file(self.vault, event))
+                         ["retrieval"]["raw_chat_sources"], [matches[0]["source"]])
+
     def test_relative_day_recall_reads_dated_original_chats(self):
         folder = self.vault / "raw" / "chats" / "fictional"
         folder.mkdir(parents=True)

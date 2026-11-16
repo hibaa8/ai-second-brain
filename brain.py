@@ -148,7 +148,9 @@ def ingest_file(vault: Path, file: Path, title: str | None = None,
 def import_chat(vault: Path, export: Path) -> dict:
     """Import JSONL chat messages with stable thread and turn IDs."""
     messages = []
-    for number, line in enumerate(export.read_text(encoding="utf-8").splitlines(), 1):
+    # JSONL records are delimited by LF. splitlines() also splits Unicode line
+    # separators that are valid characters inside a JSON string.
+    for number, line in enumerate(export.read_text(encoding="utf-8").split("\n"), 1):
         if not line.strip():
             continue
         message = json.loads(line)
@@ -336,10 +338,14 @@ def build_index(vault: Path) -> dict:
     with sqlite3.connect(target) as db:
         db.executescript("""
             DROP TABLE IF EXISTS pages_fts;
+            DROP TABLE IF EXISTS chats_fts;
+            DROP TABLE IF EXISTS chats;
             DROP TABLE IF EXISTS edges;
             DROP TABLE IF EXISTS pages;
             CREATE TABLE pages(id TEXT PRIMARY KEY, title TEXT, kind TEXT, updated TEXT, path TEXT, body TEXT);
             CREATE VIRTUAL TABLE pages_fts USING fts5(id UNINDEXED, title, body);
+            CREATE TABLE chats(source_id TEXT PRIMARY KEY, thread_id TEXT, created_at TEXT, role TEXT, path TEXT, body TEXT);
+            CREATE VIRTUAL TABLE chats_fts USING fts5(source_id UNINDEXED, body);
             CREATE TABLE edges(origin TEXT, relation TEXT, target TEXT, source TEXT, observed TEXT, status TEXT);
             CREATE INDEX edges_origin ON edges(origin);
             CREATE INDEX edges_target ON edges(target);
@@ -354,9 +360,21 @@ def build_index(vault: Path) -> dict:
                 db.execute("INSERT INTO edges VALUES (?,?,?,?,?,?)",
                            (meta["id"], rel["type"], rel["target"], rel["source"],
                             rel["observed"], rel["status"]))
+        chat_count = 0
+        for record in source_records(vault):
+            if not record["location"].startswith("raw/chats/"):
+                continue
+            path = source_path(vault, record["location"])
+            message = json.loads(path.read_text(encoding="utf-8"))
+            row = (record["id"], message["thread_id"], message.get("created_at", ""),
+                   message["role"], str(path), message["text"])
+            db.execute("INSERT INTO chats VALUES (?,?,?,?,?,?)", row)
+            db.execute("INSERT INTO chats_fts VALUES (?,?)", (record["id"], message["text"]))
+            chat_count += 1
         db.commit()
         edge_count = db.execute("SELECT count(*) FROM edges").fetchone()[0]
-    return {"pages": len(pages), "edges": edge_count, "index": str(target)}
+    return {"pages": len(pages), "edges": edge_count, "chats": chat_count,
+            "index": str(target)}
 
 
 def connect_index(vault: Path) -> sqlite3.Connection:
@@ -381,6 +399,23 @@ def search(vault: Path, query: str, limit: int = 10) -> list[dict]:
             FROM pages_fts JOIN pages p ON p.id = pages_fts.id
             WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?
         """, (expression, limit)).fetchall()
+        return [dict(row) for row in rows]
+
+
+def search_chats(vault: Path, query: str, limit: int = 10, role: str = "user") -> list[dict]:
+    """Search registered original chat text, keeping role and source identity."""
+    terms = re.findall(r"[^\W_]{3,}", query, re.UNICODE)
+    if not terms:
+        return []
+    expression = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms)
+    with connect_index(vault) as db:
+        rows = db.execute("""
+            SELECT c.source_id, c.thread_id, c.created_at, c.role, c.path,
+                   snippet(chats_fts, 1, '[', ']', ' … ', 24) AS excerpt,
+                   bm25(chats_fts) AS rank
+            FROM chats_fts JOIN chats c ON c.source_id = chats_fts.source_id
+            WHERE chats_fts MATCH ? AND c.role = ? ORDER BY rank LIMIT ?
+        """, (expression, role, limit)).fetchall()
         return [dict(row) for row in rows]
 
 
