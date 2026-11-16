@@ -89,6 +89,8 @@ Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke 
 
 ## Live local Codex use
 
+For supported local Codex chats, submitting a prompt registers its bounded text as an original chat source. When the turn finishes, the Stop hook registers the bounded final answer, refreshes a source-linked `ops/RECENT_CONVERSATIONS.md` view for Obsidian, and records retrieval and citation signals. The next prompt can search those originals without a manual import. This automatic capture does not synthesize durable wiki claims or include attachments, tool output, or every intermediate assistant message.
+
 The [optional Codex connection](integrations/codex/README.md) installs global guidance plus `UserPromptSubmit` and `Stop` hooks. In this project's local setup, both fresh local Codex CLI turns and desktop turns have verified prompt capture, relevant page retrieval, final-answer capture, and private telemetry. Hook coverage depends on the Codex client and trust state, so verify it with the steps in the integration guide.
 
 | Moment | Private vault and Obsidian | Evaluation signal |

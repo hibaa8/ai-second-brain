@@ -160,10 +160,20 @@ def import_chat(vault: Path, export: Path) -> dict:
         if message["role"] not in {"user", "assistant"}:
             raise ValueError(f"Line {number}: role must be user or assistant")
         messages.append(message)
+    return import_chat_messages(vault, messages)
+
+
+def import_chat_messages(vault: Path, messages: list[dict]) -> dict:
+    """Store validated raw chat records once per stable message identity."""
     if not messages:
         raise ValueError("Chat export has no messages")
     prepared = {}
     for message in messages:
+        for key in ("thread_id", "turn_id", "role", "text"):
+            if not isinstance(message.get(key), str) or not message[key]:
+                raise ValueError(f"Chat message missing string {key}")
+        if message["role"] not in {"user", "assistant"}:
+            raise ValueError("Chat message role must be user or assistant")
         identity = "\0".join(message[k] for k in ("thread_id", "turn_id", "role"))
         if message.get("item_id"):
             identity += "\0" + str(message["item_id"])
@@ -182,6 +192,8 @@ def import_chat(vault: Path, export: Path) -> dict:
     new_records = []
     registered_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     added = 0
+    source_ids = []
+    locations = []
     for path, data in prepared.items():
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -194,6 +206,8 @@ def import_chat(vault: Path, export: Path) -> dict:
                 temporary.unlink(missing_ok=True)
             added += 1
         digest = hashlib.sha256(data).hexdigest()
+        source_ids.append(f"src-{digest[:16]}")
+        locations.append(str(path.relative_to(vault)))
         if digest not in known_hashes:
             new_records.append({"id": f"src-{digest[:16]}",
                                 "title": f"Chat message {path.stem}",
@@ -208,7 +222,8 @@ def import_chat(vault: Path, export: Path) -> dict:
             for record in new_records:
                 stream.write(json.dumps(record, ensure_ascii=False) + "\n")
     return {"messages": len(prepared), "added": added,
-            "already_present": len(prepared) - added}
+            "already_present": len(prepared) - added, "source_ids": source_ids,
+            "locations": locations}
 
 
 def parse_page(path: Path) -> tuple[dict, str, list[dict], list[str]]:

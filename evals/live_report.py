@@ -16,6 +16,11 @@ def summarize(vault: Path) -> str:
             if line.strip()] if log.exists() else []
     offered = sum(bool(row.get("retrieved_pages")) for row in rows)
     offered_raw = sum(bool(row.get("retrieved_raw_chat_sources")) for row in rows)
+    saved_user = sum(bool(row.get("raw_capture", {}).get("user", {}).get("source_id")) for row in rows)
+    saved_answer = sum(bool(row.get("raw_capture", {}).get("assistant", {}).get("source_id")) for row in rows)
+    capture_errors = sum(bool(row.get("raw_capture", {}).get("error") or
+                              row.get("raw_capture", {}).get("user_error") or
+                              row.get("raw_capture", {}).get("assistant_error")) for row in rows)
     instrumented = [row for row in rows if "source_use" in row]
     cited = sum(bool(row["source_use"]) for row in instrumented)
     pairs = [entry for row in rows for entry in row.get("source_use", [])]
@@ -28,6 +33,9 @@ def summarize(vault: Path) -> str:
              f"| Completed turns recorded | {len(rows)} |",
              f"| Turns offered at least one wiki page | {offered} |",
              f"| Turns offered topical original chats | {offered_raw} |",
+             f"| User turns registered as raw sources | {saved_user} |",
+             f"| Final answers registered as raw sources | {saved_answer} |",
+             f"| Turns with raw-capture errors | {capture_errors} |",
              f"| Turns with source-use instrumentation | {len(instrumented)} |",
              f"| Turns citing a registered original | {cited} |",
              f"| Cited original references | {len(pairs)} |",

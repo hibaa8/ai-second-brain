@@ -49,6 +49,48 @@ class LiveHookTests(unittest.TestCase):
         self.assertIn("Turns with source-use instrumentation | 1",
                       (self.vault / "evals" / "LIVE_REPORT.md").read_text())
 
+    def test_completed_turn_becomes_searchable_in_next_conversation(self):
+        first = {"session_id": "session-a", "turn_id": "turn-1",
+                 "prompt": "I visited the museum at dawn."}
+        with redirect_stdout(StringIO()):
+            live_hook.on_prompt(self.vault, first)
+            live_hook.on_prompt(self.vault, first)
+            live_hook.on_stop(self.vault, {**first,
+                "last_assistant_message": "You visited the museum at dawn."})
+            live_hook.on_stop(self.vault, {**first,
+                "last_assistant_message": "You visited the museum at dawn."})
+        chats = list((self.vault / "raw" / "chats").rglob("*.json"))
+        self.assertEqual(len(chats), 2)
+        telemetry = json.loads((self.vault / "evals" / "live.jsonl").read_text().strip())
+        self.assertTrue(telemetry["raw_capture"]["user"]["source_id"])
+        self.assertTrue(telemetry["raw_capture"]["assistant"]["source_id"])
+        recent = (self.vault / "ops" / "RECENT_CONVERSATIONS.md").read_text()
+        self.assertIn("I visited the museum at dawn", recent)
+        self.assertIn(telemetry["raw_capture"]["user"]["source_id"], recent)
+
+        next_turn = {"session_id": "session-b", "turn_id": "turn-1",
+                     "prompt": "Where did I say I visited at dawn?"}
+        out = StringIO()
+        with redirect_stdout(out):
+            live_hook.on_prompt(self.vault, next_turn)
+        context = json.loads(out.getvalue())["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(telemetry["raw_capture"]["user"]["source_id"], context)
+
+    def test_stop_upgrades_inbox_from_older_prompt_hook(self):
+        event = {"session_id": "older-session", "turn_id": "older-turn"}
+        record = {**event, "captured_at": "2026-11-16T12:00:00+00:00",
+                  "prompt": live_hook.clipped("I visited the museum at dawn."),
+                  "retrieval": {"page_ids": [], "chat_sources": [],
+                                "milliseconds": 1.0, "error": None},
+                  "vault_stamp": list(live_hook.vault_stamp(self.vault))}
+        live_hook.write_gzip(live_hook.event_file(self.vault, event), record)
+        with redirect_stdout(StringIO()):
+            live_hook.on_stop(self.vault, {**event,
+                "last_assistant_message": "You visited the museum at dawn."})
+        saved = live_hook.read_gzip(live_hook.event_file(self.vault, event))
+        self.assertTrue(saved["raw_capture"]["user"]["source_id"])
+        self.assertTrue(saved["raw_capture"]["assistant"]["source_id"])
+
     def test_vault_change_triggers_private_regression_eval(self):
         cases = self.vault / "evals" / "cases.json"
         cases.parent.mkdir()
@@ -86,6 +128,13 @@ class LiveHookTests(unittest.TestCase):
         self.assertTrue(item["redacted"])
         self.assertNotIn("abc123longsecretvalue", item["text"])
         self.assertIn("project notes", item["text"])
+        event = {"session_id": "secret-session", "turn_id": "secret-turn",
+                 "prompt": "my api_key=abc123longsecretvalue and project notes"}
+        with redirect_stdout(StringIO()):
+            live_hook.on_prompt(self.vault, event)
+        captured = list((self.vault / "raw" / "chats").rglob("*.json"))
+        self.assertEqual(len(captured), 1)
+        self.assertNotIn("abc123longsecretvalue", captured[0].read_text())
 
     def test_only_cited_and_registered_source_is_marked_used(self):
         self.assertEqual(live_hook.cited_usage(self.vault,

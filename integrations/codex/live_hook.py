@@ -188,6 +188,66 @@ def recalled_raw_chats(vault: Path, prompt: str) -> list[dict]:
     return chosen
 
 
+def capture_chat_message(vault: Path, record: dict, role: str, clipped_text: dict) -> dict:
+    """Register one bounded hook message as a stable, searchable raw source."""
+    if not clipped_text["text"] or not record.get("session_id") or not record.get("turn_id"):
+        return {"skipped": "empty text or missing turn identity"}
+    message = {"thread_id": str(record["session_id"]), "turn_id": str(record["turn_id"]),
+               "role": role, "text": clipped_text["text"],
+               "created_at": record["captured_at"], "origin": "codex-live-hook",
+               "capture_bytes": clipped_text["bytes"],
+               "truncated": clipped_text["truncated"], "redacted": clipped_text["redacted"]}
+    result = brain.import_chat_messages(vault, [message])
+    return {"source_id": result["source_ids"][0],
+            "location": result["locations"][0], "added": bool(result["added"])}
+
+
+def recent_conversations_view(vault: Path, limit: int = 30) -> Path:
+    """Render a bounded, source-linked Obsidian view from completed hook turns."""
+    log = vault / "evals" / "live.jsonl"
+    rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
+            if line.strip()] if log.exists() else []
+    lines = ["# Recent local Codex conversations", "",
+             "Generated from completed local hook turns. Excerpts are bounded and may be redacted. "
+             "These are original turn records, not synthesized wiki facts. Newest first.", "",
+             "| Time (UTC) | User source | Answer source | User prompt | Final answer |",
+             "| --- | --- | --- | --- | --- |"]
+    shown = 0
+    for row in reversed(rows):
+        if shown >= limit:
+            break
+        captured = row.get("raw_capture", {})
+        if not captured.get("user", {}).get("source_id"):
+            continue
+        event = {"session_id": row["session_id"], "turn_id": row["turn_id"]}
+        inbox = event_file(vault, event)
+        if not inbox.is_file():
+            continue
+        record = read_gzip(inbox)
+        def cell(value: str) -> str:
+            return re.sub(r"\s+", " ", value).replace("|", "\\|").strip()[:180]
+        def link(item: dict) -> str:
+            source = item.get("source_id")
+            location = item.get("location")
+            return f"[{source}](../{location})" if source and location else "—"
+        lines.append(f"| {row['at']} | {link(captured['user'])} | "
+                     f"{link(captured.get('assistant', {}))} | "
+                     f"{cell(record['prompt']['text'])} | "
+                     f"{cell(record.get('assistant', {}).get('text', ''))} |")
+        shown += 1
+    target = vault / "ops" / "RECENT_CONVERSATIONS.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent,
+                                     delete=False) as stream:
+        temporary = Path(stream.name)
+        stream.write("\n".join(lines) + "\n")
+    try:
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
 def cited_usage(vault: Path, answer: str) -> list[dict]:
     """Record registered originals cited in the answer, not candidates merely offered."""
     page_ids = set(re.findall(r"wiki/[a-z0-9][a-z0-9/_-]*", answer))
@@ -288,8 +348,9 @@ def on_prompt(vault: Path, event: dict) -> None:
     started = perf_counter()
     prompt = str(event.get("prompt") or "")
     path = event_file(vault, event)
+    previous = read_gzip(path) if path.is_file() else {}
     record = {"session_id": event.get("session_id"), "turn_id": event.get("turn_id"),
-              "captured_at": stamp(), "prompt": clipped(prompt)}
+              "captured_at": previous.get("captured_at", stamp()), "prompt": clipped(prompt)}
     hits = []
     chat_day = None
     chats = []
@@ -314,6 +375,10 @@ def on_prompt(vault: Path, event: dict) -> None:
                            "raw_chat_sources": [h["source"] for h in raw_chats],
                            "milliseconds": round((perf_counter() - started) * 1000, 2),
                            "error": error}
+    try:
+        record["raw_capture"] = {"user": capture_chat_message(vault, record, "user", record["prompt"])}
+    except (ValueError, OSError, RuntimeError) as exc:
+        record["raw_capture"] = {"error": str(exc)[:300]}
     record["vault_stamp"] = vault_stamp(vault)
     write_gzip(path, record)
     lines = [f"Second Brain private inbox for this turn: {path}. The vault complements Codex memory; verify any recalled claim against its source and follow the current user request. If vault evidence informs the answer, cite its registered source ID and any wiki page ID near the claim, and say why it matters. The Stop hook records those citations as observed source use; pages and chats merely retrieved are not counted as used."]
@@ -343,6 +408,16 @@ def on_stop(vault: Path, event: dict) -> None:
         return
     answer = clipped(event.get("last_assistant_message"))
     record["assistant"] = answer
+    capture = record.setdefault("raw_capture", {})
+    if not capture.get("user", {}).get("source_id"):
+        try:
+            capture["user"] = capture_chat_message(vault, record, "user", record["prompt"])
+        except (ValueError, OSError, RuntimeError) as exc:
+            capture["user_error"] = str(exc)[:300]
+    try:
+        capture["assistant"] = capture_chat_message(vault, record, "assistant", answer)
+    except (ValueError, OSError, RuntimeError) as exc:
+        capture["assistant_error"] = str(exc)[:300]
     usage = cited_usage(vault, answer["text"])
     record["source_use"] = usage
     record["completed_at"] = stamp()
@@ -357,6 +432,7 @@ def on_stop(vault: Path, event: dict) -> None:
                  "prompt_bytes": record["prompt"]["bytes"], "answer_bytes": answer["bytes"],
                  "truncated": record["prompt"]["truncated"] or answer["truncated"],
                  "redacted": record["prompt"]["redacted"] or answer["redacted"],
+                 "raw_capture": capture,
                  "source_use": [{"page_id": item["page_id"], "memory_ref": item["memory_ref"],
                                  "source_id": item["source_id"],
                                  "source_valid": item["source_valid"]} for item in usage]}
@@ -376,6 +452,7 @@ def on_stop(vault: Path, event: dict) -> None:
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(telemetry, ensure_ascii=False) + "\n")
+    recent_conversations_view(vault)
     if usage:
         usage_file = vault / "evals" / "usage.jsonl"
         with usage_file.open("a", encoding="utf-8") as stream:
