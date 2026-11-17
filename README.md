@@ -1,5 +1,7 @@
 # Second Brain
 
+**I built a source-backed memory layer for Codex that I can inspect in Obsidian and evaluate against Codex’s existing memory.**
+
 An inspectable personal memory layer for Codex. Obsidian displays the Markdown vault; Codex uses agent guidance and small skills to capture sources, retrieve evidence, and synthesize answers. Optional local hooks capture bounded turn text and offer relevant pages when a prompt arrives. A standard-library CLI builds a disposable full-text and typed-graph index. Codex's existing memory remains enabled and independent.
 
 **[Watch the video demo](https://youtu.be/vJKHOTUYy80)** · [Set up your own private vault](GETTING_STARTED.md)
@@ -30,8 +32,9 @@ The Markdown and source catalog are durable records. The SQLite index is a dispo
 - **Raw sources** can be copied into the private vault with `ingest`, or referenced in a separate private archive with `source`. Identical file bytes reuse one stored copy. Chat imports deduplicate by thread, turn, role, and optional item ID.
 - **Wiki pages** are ordinary Markdown with a small frontmatter schema. Obsidian renders links and graph view.
 - **Typed relationships** are source-backed rows in a page's `## Relationships` table. The CLI derives graph edges from the same text Obsidian shows.
-- **Search** uses SQLite FTS5. Both the full-text index and graph projection are rebuilt from Markdown.
+- **Search and context** use SQLite FTS5 to find pages and original chats; `context` adds a bounded one-hop typed-graph view and checks the originals' hashes.
 - **Synthesis** is a Codex workflow, not a second model service: it reads the retrieved pages and sources, cites concrete claims, and identifies gaps.
+- **Curation review** flags isolated wiki pages and decision notes missing a rationale section without inventing relationships.
 
 ### Graph at a glance
 
@@ -58,6 +61,9 @@ Open `graph-current.svg` in Obsidian or any browser. Rerun the command after wik
 | [Obsidian, *How Obsidian stores data*](https://obsidian.md/help/Files%2Band%2Bfolders/How%2BObsidian%2Bstores%2Bdata) | A vault is a local folder of Markdown files that can be read and edited by other tools. | Obsidian is the visual editor and graph view; the files remain portable. |
 | [Chhikara et al., *Mem0*](https://arxiv.org/abs/2504.19413) | Long-term memory needs extraction, consolidation, and retrieval across conversations; the paper also explores graph memory. | Research context for later chat capture and evaluation, not a dependency or claimed benchmark result. |
 | [SQLite, *FTS5 Extension*](https://www.sqlite.org/fts5.html) | A local full-text index can retrieve candidate pages without embedding every source. | The CLI rebuilds FTS5 from the Markdown wiki. |
+| [Adam Tyler Lynch, *Obsidian Agent Memory Skills*](https://github.com/adamtylerlynch/obsidian-agent-memory-skills) | Agent orientation and scoped graph navigation keep context compact. | `context` retrieves a bounded source-checked neighborhood on demand. |
+| [Moun R., *Three-Layer Memory*](https://pub.towardsai.net/i-gave-my-ai-agent-a-three-layer-memory-obsidian-heres-how-it-thinks-now-0aaa0fdbdbbd) | Raw session history, curated memory, and a navigable vault serve different purposes. | Raw chats and the smaller wiki remain separate; no large context file is injected every turn. |
+| [Martin Lepage, *Four Approaches to Agent Memory*](https://dev.to/martinlepage26bit/i-tried-4-approaches-to-ai-agent-memory-heres-what-actually-worked-2a22) | Linked decision notes should preserve the reason and alternatives, not only the outcome. | `graph-audit` flags isolated pages and missing decision rationale for source-backed review. |
 
 These sources shaped the design; this repository is an independent implementation. [The evaluation guide](evals/README.md) describes how to measure its effect.
 
@@ -70,6 +76,8 @@ python3 brain.py --vault examples/demo-vault check
 python3 brain.py --vault examples/demo-vault index
 python3 brain.py --vault examples/demo-vault search "Orbit decision"
 python3 brain.py --vault examples/demo-vault walk wiki/people/alex --hops 2
+python3 brain.py --vault examples/demo-vault context "Alex and the Orbit pilot"
+python3 brain.py --vault examples/demo-vault graph-audit
 python3 brain.py --vault examples/demo-vault size
 python3 -m unittest discover -s tests -v
 ```
@@ -80,7 +88,7 @@ For your own vault, run `python3 brain.py --vault /absolute/path/to/private-vaul
 
 ## Evaluation
 
-Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke check. The included fictional demo currently passes 8/8 cases. See [the evaluation guide](evals/README.md) for the paired answer-eval protocol. These cases do not measure personal recall or generated-answer quality.
+Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke check. The fictional demo currently passes **8/8** cases. A separate, private **six-question paired CLI pilot** compared fresh chats using the same model and existing memory settings: on five answerable questions, the vault-assisted condition gave **5/5 source-supported answers** while the no-vault condition gave **0/5** and abstained; both correctly abstained on one unknown-fact control. Median end-to-end CLI time was **41.23 s with the vault** versus **11.42 s without it**. These selected questions and small sample do not establish a general improvement or a desktop-app baseline. See [the evaluation guide](evals/README.md) for the protocol and limitations.
 
 ## Live local Codex use
 

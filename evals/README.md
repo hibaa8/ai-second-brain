@@ -12,7 +12,7 @@ For example, a **fictional** answer that says the team chose a small pilot and c
 
 To run a private case set, keep its JSON outside this public repository and pass `--vault /path/to/private-vault --cases /path/to/private-cases.json`.
 
-## Future paired answer eval
+## Paired answer eval
 
 Use fresh chats with the same model and the same factual questions, while keeping Codex's existing memory settings unchanged in both conditions:
 
@@ -22,5 +22,14 @@ Use fresh chats with the same model and the same factual questions, while keepin
 Score the answers against the original source, not the wiki page. Record factual correctness, verified citations, unsupported claims, appropriate abstention, handling of corrections, latency, and retrieval effort. Randomize condition order and use held-out questions spanning direct facts, multi-hop relationships, changes over time, and facts absent from the vault. Do not use answer text from one condition as context for the other. A useful result is the **incremental benefit over Codex's existing memory**, including cases where the vault makes an answer worse.
 
 The current CLI smoke eval does not execute Codex or assess generated answers. Local CLI and desktop turns have produced hook records in this setup; check `evals/live.jsonl` in the private vault for each completed turn. Hook telemetry and retrieval regressions still do not supply a personal-memory effectiveness score.
+
+The public `evals/paired.py` runner collects fresh, ephemeral Codex CLI answers in two conditions. It disables only the Second Brain hooks for the no-vault condition, instructs that condition not to use files or tools, and keeps the same Codex home, model, reasoning effort, and existing memory settings. It records answer files, JSONL traces, tool-call counts, and wall time in a **private** output directory. The answer and source-grounding judgments are manual; `evals/score_paired.py` then summarizes those grades and verifies cited source hashes. Keep question sets, grades, and answers outside this repo.
+
+```bash
+python3 evals/paired.py --cases /private/path/cases.json --output /private/path/paired-results --model gpt-5.6-sol
+python3 evals/score_paired.py --vault /private/path/vault --cases /private/path/cases.json --results /private/path/paired-results --grades /private/path/grades.json
+```
+
+On November 17, 2026, a private six-question pilot used five source-grounded questions not in the earlier ten fresh-chat probes, plus one unknown-fact control. Vault-assisted answers were manually judged correct and source-supported on **5/5** answerable cases, with valid hashes for the cited originals. The no-vault condition abstained on all five answerable cases; both conditions abstained correctly on the unknown control. All no-vault traces had zero tool calls. Median end-to-end CLI wall time was **41.23 s** with the vault and **11.42 s** without it, including model startup and tool use. This is a small, hand-selected pilot with one run per condition. It does not establish population-level performance, isolate every source of improvement, or prove that ephemeral CLI sessions expose the same built-in memory as Codex desktop.
 
 OpenAI [documents local Codex memories as a separate store and set of controls](https://learn.chatgpt.com/docs/customization/memories). This project does not call those controls or edit that store. Codex may still generate its own memories from eligible chats according to the user's existing settings; the paired eval leaves those settings unchanged.
