@@ -46,9 +46,13 @@ Allowed types initially: `works_on`, `part_of`, `decided`, `supersedes`, `relate
 
 An Obsidian link alone means navigation, not a factual relationship. A typed row asserts a relationship and must cite a registered source. A correction should mark the earlier row `superseded` or `withdrawn` and add the current row. `walk` traverses only active rows. The original source and old row remain visible for review.
 
+For a decision page, add `## Why` and `## Alternatives considered` when the originals support them. A missing reason is an evidence gap, not permission to infer one. `brain.py graph-audit` lists isolated pages and decision pages lacking a rationale section so the agent can review them. The audit does not require arbitrary links or change validation status.
+
 ## Answer contract
 
 Codex answers from the retrieved page and source evidence. It cites source IDs or page links for concrete statements, distinguishes a source claim from its own inference, and says when evidence is absent, stale, or contradictory. A graph path is a retrieval clue, not sufficient proof of an answer.
+
+`brain.py context '<question>'` packages the top wiki hits, up to one hop of active typed relationships, and up to two matching original chats. It reports why each page was selected and checks the registered hashes of cited originals. It is a bounded navigation aid; the agent still reads the original before stating a personal fact.
 
 ## Storage
 

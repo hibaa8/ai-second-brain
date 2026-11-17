@@ -549,6 +549,103 @@ def walk(vault: Path, seed: str, hops: int = 2, limit: int = 30) -> list[dict]:
         return found
 
 
+def context_pack(vault: Path, query: str, *, page_limit: int = 4,
+                 excerpt_chars: int = 420) -> dict:
+    """Return a bounded, source-checked search result with useful graph neighbors."""
+    if not 1 <= page_limit <= 8 or not 100 <= excerpt_chars <= 2000:
+        raise ValueError("page_limit must be 1–8 and excerpt_chars 100–2000")
+    direct = search(vault, query, limit=2)
+    pages_by_id = {page["meta"]["id"]: page for page in read_pages(vault)}
+    source_by_id = {record["id"]: record for record in source_records(vault)}
+    chosen: list[tuple[str, str, dict | None]] = []
+    for hit in direct:
+        chosen.append((hit["id"], "search", None))
+    related = []
+    terms = set(re.findall(r"[^\W_]{3,}", query.casefold()))
+    for hit in direct:
+        for item in walk(vault, hit["id"], hops=1, limit=30):
+            page_id = item["page"]
+            if page_id in {entry[0] for entry in chosen} or page_id not in pages_by_id:
+                continue
+            edge = item["path"][0]
+            page = pages_by_id[page_id]
+            text = (page["meta"]["title"] + " " + page["body"]).casefold()
+            score = sum(term in text for term in terms)
+            if edge["relation"] in {"decided", "supersedes"}:
+                score += 2
+            related.append((-score, page_id, hit["id"], edge))
+    for _, page_id, seed, edge in sorted(related, key=lambda item: (item[0], item[1])):
+        if len(chosen) >= page_limit:
+            break
+        if page_id not in {entry[0] for entry in chosen}:
+            chosen.append((page_id, f"one-hop {edge['relation']} from {seed}", edge))
+    packed = []
+    for page_id, reason, edge in chosen[:page_limit]:
+        page = pages_by_id[page_id]
+        meta = page["meta"]
+        sources = []
+        page_source_ids = [part.strip() for part in meta["sources"].split(",") if part.strip()]
+        if edge and edge["source"] not in page_source_ids:
+            page_source_ids.append(edge["source"])
+        for source_id in page_source_ids:
+            record = source_by_id.get(source_id)
+            path = source_path(vault, record["location"]) if record else None
+            sources.append({"id": source_id, "available": bool(path and path.is_file()),
+                            "hash_matches": bool(path and path.is_file() and
+                                                 sha256(path) == record["sha256"])})
+        prose = page["body"].split("## Relationships", 1)[0].strip()
+        rationale = re.search(r"(?ims)^## (why|rationale|reasoning|decision context)\b[^\n]*\n(.*?)(?=^## |\Z)", prose)
+        if rationale and rationale.start() >= excerpt_chars:
+            prose = prose[:excerpt_chars // 2].rstrip() + "\n…\n" + rationale.group(0)
+        packed.append({"id": page_id, "title": meta["title"], "kind": meta["kind"],
+                       "reason": reason, "via_source": edge["source"] if edge else None,
+                       "excerpt": prose[:excerpt_chars], "sources": sources})
+    raw = []
+    declared = {source["id"] for page in packed for source in page["sources"]}
+    useful_terms = {term for term in terms if len(term) >= 4 and term not in
+                    {"what", "when", "where", "which", "that", "this", "from", "with",
+                     "about", "have", "were", "would", "could", "should", "does", "your"}}
+    for hit in search_chats(vault, query, limit=12):
+        if len(raw) == 2:
+            break
+        if hit["source_id"] in declared:
+            continue
+        record = source_by_id.get(hit["source_id"])
+        path = source_path(vault, record["location"]) if record else None
+        if not path or not path.is_file():
+            continue
+        message = json.loads(path.read_text(encoding="utf-8"))
+        haystack = (hit["title"] + " " + message["text"]).casefold()
+        if sum(term in haystack for term in useful_terms) < 2:
+            continue
+        raw.append({"source_id": hit["source_id"], "title": hit["title"],
+                    "created_at": hit["created_at"], "excerpt": hit["excerpt"],
+                    "hash_matches": sha256(path) == record["sha256"]})
+    return {"query": query, "pages": packed, "raw_chats": raw,
+            "note": "Graph paths are retrieval clues; verify the original before answering."}
+
+
+def graph_audit(vault: Path) -> dict:
+    """Flag curation gaps without inventing links or failing validation."""
+    pages = read_pages(vault)
+    connected = set()
+    for page in pages:
+        for relation in page["relations"]:
+            if relation["status"] == "active":
+                connected.update((page["meta"]["id"], relation["target"]))
+        if page["links"]:
+            connected.add(page["meta"]["id"])
+            connected.update(page["links"])
+    isolated = [page["meta"]["id"] for page in pages
+                if page["meta"]["id"] not in connected]
+    decisions = [page["meta"]["id"] for page in pages
+                 if page["meta"]["kind"] == "decision"
+                 and not re.search(r"(?im)^## (why|rationale|reasoning|decision context)\b", page["body"])]
+    return {"wiki_pages": len(pages), "isolated_pages": isolated,
+            "decision_pages_without_rationale_section": decisions,
+            "note": "These are review prompts, not validation failures. Add only source-supported links and rationale."}
+
+
 def size_report(vault: Path) -> dict:
     files = [p for p in vault.rglob("*") if p.is_file() and ".git" not in p.parts]
     vault_bytes = sum(p.stat().st_size for p in files)
@@ -600,6 +697,10 @@ def main() -> int:
     walk_cmd.add_argument("page_id")
     walk_cmd.add_argument("--hops", type=int, default=2)
     walk_cmd.add_argument("--limit", type=int, default=30)
+    context_cmd = commands.add_parser("context", help="Build a bounded, source-checked search and graph context pack")
+    context_cmd.add_argument("query")
+    context_cmd.add_argument("--pages", type=int, default=4)
+    commands.add_parser("graph-audit", help="List isolated pages and decision rationale gaps")
     commands.add_parser("size", help="Report vault, archive-reference, and index size")
     commands.add_parser("stats", help="Report chat, page, relationship, source, and storage counts")
     args = parser.parse_args()
@@ -627,6 +728,10 @@ def main() -> int:
             result = search(vault, args.query, args.limit)
         elif args.command == "walk":
             result = walk(vault, args.page_id, args.hops, args.limit)
+        elif args.command == "context":
+            result = context_pack(vault, args.query, page_limit=args.pages)
+        elif args.command == "graph-audit":
+            result = graph_audit(vault)
         elif args.command == "stats":
             result = stats_report(vault)
         else:

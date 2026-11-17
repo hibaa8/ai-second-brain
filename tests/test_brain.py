@@ -160,6 +160,37 @@ class BrainTests(unittest.TestCase):
         self.assertIn("wiki/decisions/orbit-pilot", [item["page"] for item in two_hops])
         self.assertTrue(all(len(item["path"]) <= 2 for item in two_hops))
 
+    def test_context_pack_follows_sourced_graph_edge_and_checks_original(self):
+        brain.build_index(self.vault)
+        pack = brain.context_pack(self.vault, "Alex", page_limit=4)
+        ids = [page["id"] for page in pack["pages"]]
+        self.assertIn("wiki/people/alex", ids)
+        self.assertIn("wiki/projects/orbit", ids)
+        orbit = next(page for page in pack["pages"] if page["id"] == "wiki/projects/orbit")
+        self.assertTrue(all(source["hash_matches"] for source in orbit["sources"]))
+        self.assertIn("one-hop", orbit["reason"])
+
+    def test_graph_audit_flags_isolated_page_and_missing_decision_rationale(self):
+        isolated = self.vault / "wiki" / "topics" / "unlinked.md"
+        isolated.parent.mkdir(parents=True)
+        isolated.write_text("---\nid: wiki/topics/unlinked\ntitle: Unlinked\nkind: topic\n"
+                            "updated: 2026-11-15\nsources: \n---\n\n# Unlinked\n")
+        audit = brain.graph_audit(self.vault)
+        self.assertIn("wiki/topics/unlinked", audit["isolated_pages"])
+        self.assertIn("wiki/decisions/orbit-pilot", audit["decision_pages_without_rationale_section"])
+        self.assertEqual(brain.validate(self.vault), [])
+
+    def test_context_pack_includes_matching_original_chat_beside_wiki(self):
+        imported = brain.import_chat_messages(self.vault, [{
+            "thread_id": "chat-context", "turn_id": "one", "role": "user",
+            "text": "Alex confirmed the Orbit pilot plan after the design review."}])
+        brain.build_index(self.vault)
+        pack = brain.context_pack(self.vault, "Alex Orbit pilot plan")
+        self.assertTrue(pack["pages"])
+        self.assertIn(imported["source_ids"][0],
+                      [chat["source_id"] for chat in pack["raw_chats"]])
+        self.assertTrue(pack["raw_chats"][0]["hash_matches"])
+
     def test_withdrawn_relationship_is_not_traversed(self):
         person = self.vault / "wiki" / "people" / "alex.md"
         person.write_text(person.read_text().replace("| active |", "| withdrawn |"))
