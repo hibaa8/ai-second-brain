@@ -5,4 +5,4 @@
 - Run `python3 -m unittest discover -s tests -v` after changing `brain.py`.
 - Keep the public demo fictional. The private Obsidian vault is a separate directory.
 - Retrieval order: search for seed pages, traverse typed edges only for relationship questions, then verify claims in sources before synthesis.
-- The vault complements Codex's existing memory. Vault workflows must not change memory settings, global Codex configuration, or saved memories. Explicit user corrections take precedence over vault notes.
+- The vault complements Codex's existing memory. Vault maintenance must not change memory settings or saved memories. The optional installer changes global Codex guidance and hooks only when the user explicitly runs it. Explicit user corrections take precedence over vault notes.

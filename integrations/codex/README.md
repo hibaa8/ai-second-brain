@@ -2,6 +2,8 @@
 
 This optional connection gives **new local Codex chats** a route to the private vault without changing Codex's own memory settings or files. The installer adds a small global `AGENTS.md` block and two additive hooks. It preserves unrelated global guidance and hooks.
 
+From a fresh clone, first create a private vault with `python3 brain.py --vault /absolute/path/to/private-vault init` and follow [the setup guide](../../GETTING_STARTED.md). Keep the cloned engine at a stable path after installing: the hook commands point to its `live_hook.py` file.
+
 ```bash
 python3 integrations/codex/install.py --vault /absolute/path/to/private-vault --dry-run
 python3 integrations/codex/install.py --vault /absolute/path/to/private-vault

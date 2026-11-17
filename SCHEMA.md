@@ -12,6 +12,8 @@ An optional private `raw/chat_threads.json` maps stable thread IDs to `{ "title"
 
 For chats, `brain.py chat-import export.jsonl` accepts one JSON object per line with nonempty `thread_id`, `turn_id`, `role` (`user` or `assistant`), and `text`. Optional `item_id` distinguishes multiple messages of the same role in one turn; `created_at` and attachment metadata can be included. The importer stores immutable JSON under `raw/chats/`, cataloging each message as a source. Reimporting the same message is a no-op; changed content for the same message identity is a conflict that must be reviewed, rather than silently duplicated or overwritten. Store attached document bytes separately with `ingest` and link their source IDs from the wiki.
 
+`tools/chatgpt_export.py export.zip --vault VAULT` reads `conversations.json` or split `conversations-000.json` parts directly from a ChatGPT export ZIP and feeds supported user and assistant text turns through the same importer. It also updates `raw/chat_threads.json` so conversation titles are searchable. Reasoning, tool messages, and non-text attachment bytes are outside this text import. The original ZIP is not stored by this command; keep it separately if needed.
+
 ## Wiki pages
 
 One durable topic per page, under `wiki/`. The `id` is its vault-relative path without `.md`. Use simple scalar frontmatter so the standard-library checker can parse it:
@@ -51,3 +53,5 @@ Codex answers from the retrieved page and source evidence. It cites source IDs o
 ## Storage
 
 The Obsidian vault holds Markdown, stored raw documents and chat messages, and a catalog. Large uploads may instead be referenced in a separate private archive. The SQLite index resides beside the vault and can be deleted and rebuilt. Use `brain.py size` to watch growth. Whole-file hashes deduplicate identical documents; stable message IDs deduplicate overlapping chat imports. Similar but nonidentical files remain separate until deliberately reviewed.
+
+`brain.py stats` reports the count of title-cataloged threads, registered chat messages, wiki pages, typed relationship rows, registered sources, vault bytes, and disposable index bytes. The title-cataloged count comes from optional `raw/chat_threads.json`; it is zero for vaults that only contain local hook chats without an imported title catalog.

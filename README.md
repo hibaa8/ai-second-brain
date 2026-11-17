@@ -4,6 +4,8 @@ An inspectable personal memory layer for Codex. Obsidian displays the Markdown v
 
 This is an original, small implementation inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) and [Garry Tan's GBrain](https://github.com/garrytan/gbrain).
 
+**Start here:** [Reproduce the workflow with your own private vault](GETTING_STARTED.md). The [video claim notes](VIDEO_CLAIMS.md) explain the private snapshot shown in the walkthrough and which measurements a clone can reproduce. No personal conversations or documents are included in this repository.
+
 ## What it does
 
 ```mermaid
@@ -83,6 +85,8 @@ python3 -m unittest discover -s tests -v
 
 The index is written beside the vault in `.brain-index/`, not inside the synced vault.
 
+For your own vault, run `python3 brain.py --vault /absolute/path/to/private-vault init`, then follow [the full setup guide](GETTING_STARTED.md) to import ChatGPT export text, add documents, create source-backed wiki pages, connect local Codex hooks, and verify capture.
+
 ## Evaluation
 
 Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke check. The included fictional demo currently passes 8/8 cases, with the expected page ranked first in 3/4 search questions. See [the dated results](evals/RESULTS.md) and [the paired answer-eval protocol](evals/README.md). These numbers do not measure personal recall or generated-answer quality.
@@ -103,21 +107,7 @@ The regression cases check search, prompt-hook candidate retrieval, dated-chat r
 
 ## Use with your own vault
 
-Imported chats are indexed by their registered original text and optional conversation titles. If a prompt finds no curated page or dated recap, the hook can offer up to two topical user-chat excerpts with source IDs. The live report tracks those offers separately from final-answer citations. Large media in a chat export can remain in an external archive while selected documents are ingested by content hash.
-
-1. Create a private folder and open it as a vault in Obsidian. Do not place private sources in this public repository.
-2. Copy `SCHEMA.md` and adapt the `AGENTS.md` guidance to the private vault. Keep the initial `wiki/index.md` and `wiki/now.md` short.
-3. Store a raw document: `python3 brain.py --vault /absolute/path/to/vault ingest /absolute/path/to/document --title "Document title"`. The default per-file limit is 50 MB; use `--max-mb` when intentionally storing a larger file. For an original already kept in a separately backed-up private archive, use `source` to reference it without copying.
-4. Import raw chats from a JSONL export: `python3 brain.py --vault /absolute/path/to/vault chat-import /absolute/path/to/chat.jsonl`. Each line needs `thread_id`, `turn_id`, `role`, and `text`; an optional `item_id` distinguishes multiple messages in a turn. Repeated imports reuse the stored messages.
-
-   ```json
-   {"thread_id":"chat-123","turn_id":"turn-1","role":"user","text":"My original message","created_at":"2026-11-15T10:00:00Z"}
-   ```
-
-5. Ask Codex to use the **brain-capture** skill to create or update source-backed pages, then run `check` and `index`.
-6. Ask a question with the **brain-recall** skill. It searches first, traverses typed relationships only when useful, and synthesizes a cited answer.
-
-See [SCHEMA.md](SCHEMA.md) for page and relationship conventions and [the evaluation guide](evals/README.md) for how to test memory performance.
+The [setup guide](GETTING_STARTED.md) gives runnable commands from a clean clone, including a vault initializer and a ChatGPT export ZIP importer. Imported chats are indexed by their registered original text and optional conversation titles. If a prompt finds no curated page or dated recap, the hook can offer up to two topical user-chat excerpts with source IDs. The live report tracks those offers separately from final-answer citations. Large media can remain in an external private archive while selected documents are ingested by content hash. See [SCHEMA.md](SCHEMA.md) for page conventions and [the evaluation guide](evals/README.md) for how to test memory performance.
 
 ## Boundaries
 
