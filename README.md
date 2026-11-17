@@ -41,15 +41,6 @@ The Markdown and source catalog are durable records. The SQLite index is a dispo
 
 The left pane illustrates stored raw documents and chats beside wiki pages. The graph pane resembles Obsidian's [native Graph view](https://obsidian.md/help/plugins/graph), where wiki links update as Markdown files change. In the private vault, the saved filter focuses on `wiki/` pages and hides raw records and navigation notes. The graph icon in Obsidian's left ribbon opens it. Its **Animate** button replays note creation order, which is not a complete history of changed edges.
 
-<details>
-<summary>See the stricter typed graph used by the search engine</summary>
-
-![Fictional demo vault graph with four wiki pages and three typed relationships](assets/demo-graph.svg)
-
-This second picture is generated from the fictional demo vault. Each box is a wiki page; arrows are active, typed relationships backed by a registered source. It is a static snapshot, separate from Obsidian's live wiki-link graph.
-
-</details>
-
 The real vault stays private. Generate a typed-graph snapshot of your own vault with:
 
 ```bash
