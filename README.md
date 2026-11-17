@@ -4,7 +4,7 @@ An inspectable personal memory layer for Codex. Obsidian displays the Markdown v
 
 This is an original, small implementation inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) and [Garry Tan's GBrain](https://github.com/garrytan/gbrain).
 
-**Start here:** [Reproduce the workflow with your own private vault](GETTING_STARTED.md). The [video claim notes](VIDEO_CLAIMS.md) explain the private snapshot shown in the walkthrough and which measurements a clone can reproduce. No personal conversations or documents are included in this repository.
+**Start here:** [Set up your own private vault](GETTING_STARTED.md). The repo contains only fictional examples, not personal conversations or documents.
 
 ## What it does
 
@@ -89,7 +89,7 @@ For your own vault, run `python3 brain.py --vault /absolute/path/to/private-vaul
 
 ## Evaluation
 
-Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke check. The included fictional demo currently passes 8/8 cases, with the expected page ranked first in 3/4 search questions. See [the dated results](evals/RESULTS.md) and [the paired answer-eval protocol](evals/README.md). These numbers do not measure personal recall or generated-answer quality.
+Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke check. The included fictional demo currently passes 8/8 cases. See [the evaluation guide](evals/README.md) for the paired answer-eval protocol. These cases do not measure personal recall or generated-answer quality.
 
 ## Live local Codex use
 
@@ -104,10 +104,6 @@ The [optional Codex connection](integrations/codex/README.md) installs global gu
 | The turn ends | Register the bounded final answer as a raw source and refresh `ops/RECENT_CONVERSATIONS.md`. | Check captured source hashes and the incremental index; record cited source use. Run the full private regression suite when wiki pages changed. |
 
 The regression cases check search, prompt-hook candidate retrieval, dated-chat recall, graph traversal, and source integrity. The usage log distinguishes evidence merely offered from registered originals explicitly cited in an answer and records the claim that used them. It does **not** grade correctness or prove an improvement over Codex's built-in memory. That requires the [paired fresh-chat eval](evals/README.md), with both conditions using the same existing Codex memory settings. Uploaded attachments and full historical transcripts are outside the hook's capture scope. This connection is for supported **local Codex** sessions; ChatGPT Work, cloud runs, and other devices need separate integration and coverage tests.
-
-## Use with your own vault
-
-The [setup guide](GETTING_STARTED.md) gives runnable commands from a clean clone, including a vault initializer and a ChatGPT export ZIP importer. Imported chats are indexed by their registered original text and optional conversation titles. If a prompt finds no curated page or dated recap, the hook can offer up to two topical user-chat excerpts with source IDs. The live report tracks those offers separately from final-answer citations. Large media can remain in an external private archive while selected documents are ingested by content hash. See [SCHEMA.md](SCHEMA.md) for page conventions and [the evaluation guide](evals/README.md) for how to test memory performance.
 
 ## Boundaries
 

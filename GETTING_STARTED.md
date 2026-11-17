@@ -68,5 +68,3 @@ python3 -m unittest discover -s "$BRAIN_REPO/tests" -v
 ```
 
 The included evaluation uses fictional demo cases. For your own wiki, keep private retrieval cases in `$BRAIN_VAULT/evals/cases.json` and run `evals/run.py --vault "$BRAIN_VAULT" --cases "$BRAIN_VAULT/evals/cases.json"`. The live hook writes telemetry under your private `evals/`; it records what was offered and explicitly cited, not whether an answer was correct or better than Codex alone. For an effectiveness claim, use [the paired answer evaluation protocol](evals/README.md).
-
-The video’s aggregate snapshot and measurement definitions are in [VIDEO_CLAIMS.md](VIDEO_CLAIMS.md). Your counts will depend on your own data.
