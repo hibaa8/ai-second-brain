@@ -18,6 +18,27 @@ class BrainTests(unittest.TestCase):
         self.vault = Path(self.temp.name) / "vault"
         shutil.copytree(DEMO, self.vault)
 
+    def test_init_creates_new_vault_and_preserves_existing_notes(self):
+        fresh = Path(self.temp.name) / "fresh-vault"
+        first = brain.init_vault(fresh)
+        self.assertEqual(len(first["created"]), 3)
+        self.assertEqual(brain.validate(fresh), [])
+        self.assertEqual(brain.build_index(fresh)["pages"], 0)
+        note = fresh / "wiki" / "now.md"
+        note.write_text("# Now\n\nMy own note.\n", encoding="utf-8")
+        second = brain.init_vault(fresh)
+        self.assertEqual(second["created"], [])
+        self.assertIn("My own note", note.read_text(encoding="utf-8"))
+
+    def test_stats_reports_cataloged_vault_content(self):
+        (self.vault / "raw" / "chat_threads.json").write_text(
+            json.dumps({"chat-a": {"title": "A chat"}}), encoding="utf-8")
+        report = brain.stats_report(self.vault)
+        self.assertEqual(report["cataloged_chat_threads"], 1)
+        self.assertEqual(report["wiki_pages"], 4)
+        self.assertEqual(report["typed_relationships"], 3)
+        self.assertEqual(report["registered_raw_sources"], 1)
+
     def test_source_registration_deduplicates_identical_content(self):
         original = self.vault / "raw" / "orbit-brief.md"
         duplicate = self.vault / "raw" / "same-brief.md"

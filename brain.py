@@ -24,6 +24,29 @@ STATUSES = {"active", "superseded", "withdrawn"}
 REQUIRED = {"id", "title", "kind", "updated", "sources"}
 
 
+def init_vault(vault: Path) -> dict:
+    """Create a minimal private Obsidian vault without overwriting existing files."""
+    vault = vault.expanduser().resolve()
+    if vault.exists() and not vault.is_dir():
+        raise ValueError(f"Vault path is not a directory: {vault}")
+    for name in ("raw", "wiki", "evals", "ops"):
+        (vault / name).mkdir(parents=True, exist_ok=True)
+    files = {
+        "raw/sources.jsonl": "",
+        "wiki/index.md": "# Second Brain\n\nStart with [[wiki/now]]. Add source-backed topic pages as you learn.\n",
+        "wiki/now.md": "# Now\n\nCurrent focus and open questions go here. Link to source-backed pages.\n",
+    }
+    created = []
+    for name, content in files.items():
+        path = vault / name
+        if not path.exists():
+            with path.open("x", encoding="utf-8") as stream:
+                stream.write(content)
+            created.append(name)
+    return {"vault": str(vault), "created": created,
+            "existing_files_preserved": True}
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -541,10 +564,24 @@ def size_report(vault: Path) -> dict:
             "index_bytes": db_path(vault).stat().st_size if db_path(vault).exists() else 0}
 
 
+def stats_report(vault: Path) -> dict:
+    """Summarize the durable vault records behind a public snapshot."""
+    pages = read_pages(vault)
+    records = source_records(vault)
+    size = size_report(vault)
+    return {"cataloged_chat_threads": len(chat_titles(vault)),
+            "registered_chat_messages": sum(r["location"].startswith("raw/chats/") for r in records),
+            "wiki_pages": len(pages),
+            "typed_relationships": sum(len(p["relations"]) for p in pages),
+            "registered_raw_sources": len(records),
+            "vault_bytes": size["vault_bytes"], "index_bytes": size["index_bytes"]}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault", type=Path, required=True, help="Path to an Obsidian vault")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("init", help="Create a minimal private vault without overwriting files")
     source_cmd = commands.add_parser("source", help="Reference a raw source without copying it")
     source_cmd.add_argument("file", type=Path)
     source_cmd.add_argument("--title")
@@ -564,12 +601,15 @@ def main() -> int:
     walk_cmd.add_argument("--hops", type=int, default=2)
     walk_cmd.add_argument("--limit", type=int, default=30)
     commands.add_parser("size", help="Report vault, archive-reference, and index size")
+    commands.add_parser("stats", help="Report chat, page, relationship, source, and storage counts")
     args = parser.parse_args()
     vault = args.vault.expanduser().resolve()
-    if not vault.is_dir():
+    if args.command != "init" and not vault.is_dir():
         parser.error(f"Vault directory does not exist: {vault}")
     try:
-        if args.command == "source":
+        if args.command == "init":
+            result = init_vault(vault)
+        elif args.command == "source":
             result = add_source(vault, args.file, args.title)
         elif args.command == "ingest":
             if args.max_mb < 1:
@@ -587,6 +627,8 @@ def main() -> int:
             result = search(vault, args.query, args.limit)
         elif args.command == "walk":
             result = walk(vault, args.page_id, args.hops, args.limit)
+        elif args.command == "stats":
+            result = stats_report(vault)
         else:
             result = size_report(vault)
         print(json.dumps(result, indent=2, ensure_ascii=False))
