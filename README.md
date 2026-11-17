@@ -6,8 +6,6 @@ An inspectable personal memory layer for Codex. Obsidian displays the Markdown v
 
 This is an original, small implementation inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) and [Garry Tan's GBrain](https://github.com/garrytan/gbrain).
 
-The repo contains only fictional examples, not personal conversations or documents.
-
 ## What it does
 
 ```mermaid
