@@ -200,7 +200,11 @@ def capture_chat_message(vault: Path, record: dict, role: str, clipped_text: dic
     """Register one bounded hook message as a stable, searchable raw source."""
     if not clipped_text["text"] or not record.get("session_id") or not record.get("turn_id"):
         return {"skipped": "empty text or missing turn identity"}
+    # Codex may submit more than one prompt or final answer under a turn ID.
+    # Keep each distinct bounded text immutable while deduplicating exact retries.
+    item_id = hashlib.sha256(clipped_text["text"].encode("utf-8")).hexdigest()[:16]
     message = {"thread_id": str(record["session_id"]), "turn_id": str(record["turn_id"]),
+               "item_id": item_id,
                "role": role, "text": clipped_text["text"],
                "created_at": record["captured_at"], "origin": "codex-live-hook",
                "capture_bytes": clipped_text["bytes"],

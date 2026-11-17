@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 import brain
+from integrations.codex.live_hook import capture_chat_message
 
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo-vault"
@@ -69,6 +70,20 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(result["added"], 1)
         stored = next((self.vault / "raw" / "chats").rglob("*.json"))
         self.assertEqual(json.loads(stored.read_text())["text"], message["text"])
+
+    def test_hook_capture_keeps_distinct_messages_under_one_turn(self):
+        record = {"session_id": "session-a", "turn_id": "turn-a",
+                  "captured_at": "2026-11-17T00:00:00Z"}
+        def bounded(text):
+            return {"text": text, "bytes": len(text.encode()), "truncated": False,
+                    "redacted": False}
+        first = capture_chat_message(self.vault, record, "user", bounded("First prompt."))
+        second = capture_chat_message(self.vault, record, "user", bounded("Follow-up prompt."))
+        retry = capture_chat_message(self.vault, record, "user", bounded("Follow-up prompt."))
+        self.assertNotEqual(first["source_id"], second["source_id"])
+        self.assertFalse(retry["added"])
+        self.assertEqual(second["source_id"], retry["source_id"])
+        self.assertEqual(len(list((self.vault / "raw" / "chats").rglob("*.json"))), 2)
 
     def test_registered_raw_chats_are_searchable_after_indexing(self):
         export = Path(self.temp.name) / "chat-search.jsonl"
