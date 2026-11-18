@@ -38,7 +38,7 @@ The Markdown and source catalog are durable records. The SQLite index is a dispo
 
 ![Fictional dark Obsidian-style vault showing raw sources, wiki notes, and a linked graph](assets/fictional-obsidian-vault.svg)
 
-*Fictional illustration of the vault in Obsidian. All names, files, and graph nodes are synthetic; no private vault content appears in this repository.*
+*Fictional illustration of the vault in Obsidian. Its names, files, and graph nodes are synthetic.*
 
 The left pane illustrates stored raw documents and chats beside wiki pages. The graph pane resembles Obsidian's [native Graph view](https://obsidian.md/help/plugins/graph), where wiki links update as Markdown files change. In the private vault, the saved filter focuses on `wiki/` pages and hides raw records and navigation notes. The graph icon in Obsidian's left ribbon opens it. Its **Animate** button replays note creation order, which is not a complete history of changed edges.
 
@@ -49,6 +49,12 @@ python3 graph_view.py --vault /absolute/path/to/private-vault --output /absolute
 ```
 
 Open `graph-current.svg` in Obsidian or any browser. Rerun the command after wiki changes; the image is a snapshot, not a live view.
+
+### Source-backed recall in a real chat
+
+<a href="assets/source-backed-recall.png"><img src="assets/source-backed-recall.png" alt="Codex recalls an older conversation, cites archived messages, and identifies what it cannot verify" width="480"></a>
+
+*A fresh chat recalled a discussion from a year earlier, cited the archived messages, and distinguished a shared draft from a final submission. The underlying vault remains private.*
 
 ## Design references
 
