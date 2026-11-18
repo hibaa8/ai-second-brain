@@ -110,8 +110,4 @@ The [optional Codex connection](integrations/codex/README.md) installs global gu
 
 The regression cases check search, prompt-hook candidate retrieval, dated-chat recall, graph traversal, and source integrity. The usage log distinguishes evidence merely offered from registered originals explicitly cited in an answer and records the claim that used them. It does **not** grade correctness or prove an improvement over Codex's built-in memory. That requires the [paired fresh-chat eval](evals/README.md), with both conditions using the same existing Codex memory settings. Uploaded attachments and full historical transcripts are outside the hook's capture scope. This connection is for supported **local Codex** sessions; ChatGPT Work, cloud runs, and other devices need separate integration and coverage tests.
 
-## Boundaries
 
-The CLI does not import every past Codex or ChatGPT conversation automatically. The optional hook stores bounded local turns; full chat exports need `chat-import`. Uploaded attachments need a separate `ingest` step. Content hashes remove exact document duplicates, and stable message IDs remove repeated chat turns; similar versions remain separate for review. A registered external source remains wherever it was saved; the vault record is not its backup. Obsidian Sync and a separate backup can be configured independently.
-
-For a public portfolio repository, use only synthetic examples. Keep the real vault separate and private. Generated `.brain-index/` files should not be committed.
