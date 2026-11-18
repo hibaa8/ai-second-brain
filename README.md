@@ -88,7 +88,15 @@ For your own vault, run `python3 brain.py --vault /absolute/path/to/private-vaul
 
 ## Evaluation
 
-Run `python3 evals/run.py` for a read-only retrieval and source-integrity smoke check. The fictional demo currently passes **8/8** cases. A separate, private **six-question paired CLI pilot** compared fresh chats using the same model and existing memory settings: on five answerable questions, the vault-assisted condition gave **5/5 source-supported answers** while the no-vault condition gave **0/5** and abstained; both correctly abstained on one unknown-fact control. Median end-to-end CLI time was **41.23 s with the vault** versus **11.42 s without it**. These selected questions and small sample do not establish a general improvement or a desktop-app baseline. See [the evaluation guide](evals/README.md) for the protocol and limitations.
+Evaluation covers several layers: the fictional retrieval and source-integrity demo passes **8/8** cases; the private vault's search, graph, hook, and source checks pass **72/72** cases; and supported local turns record retrieval and cited-source use as they happen. A separate **six-question paired CLI pilot** compared fresh answers with and without the vault:
+
+| Question type from the private pilot | Without vault | With vault |
+| --- | --- | --- |
+| An exact limit from an earlier study-app discussion | Said it did not know | Gave the correct number and cited the original |
+| Two classifiers named in an earlier research project | Said it did not know | Named both correctly and cited the original |
+| A fact absent from the sources | Abstained | Abstained |
+
+Across the five answerable pilot questions, the vault condition gave **5/5 source-supported answers**; the no-vault condition gave **0/5** and abstained. Median end-to-end CLI time was **41.23 s with the vault** versus **11.42 s without it**. The paired result shows how these observed responses differed, while the regression cases and live logs check different parts of the workflow. The small selected sample does not establish a general improvement or a desktop-app baseline. See [the evaluation guide](evals/README.md) for methods and limitations.
 
 ## Live local Codex use
 
