@@ -4,7 +4,7 @@
 
 An inspectable personal memory layer for Codex. Obsidian displays the Markdown vault; Codex uses agent guidance and small skills to capture sources, retrieve evidence, and synthesize answers. Optional local hooks capture bounded turn text and offer relevant pages when a prompt arrives. A standard-library CLI builds a disposable full-text and typed-graph index. Codex's existing memory remains enabled and independent.
 
-**[Watch the video demo](https://youtu.be/vJKHOTUYy80)** · [Set up your own private vault](GETTING_STARTED.md)
+**[Watch the video demo](https://www.youtube.com/watch?v=3w2jf50C6Uw)** · [Set up your own private vault](GETTING_STARTED.md)
 
 ## What it does
 
